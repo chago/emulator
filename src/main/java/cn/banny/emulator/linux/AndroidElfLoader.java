@@ -261,7 +261,7 @@ public class AndroidElfLoader implements Memory, Loader {
         resolveSymbols();
         if (callInitFunction || forceCallInit) {
             for (Module m : modules.values().toArray(new Module[0])) {
-                boolean forceCall = forceCallInit && m == module;
+                boolean forceCall = (forceCallInit && m == module) || m.forceCallInit;
                 if (callInitFunction) {
                     m.callInitFunction(emulator, forceCall);
                 } else if(forceCall) {
@@ -303,6 +303,15 @@ public class AndroidElfLoader implements Memory, Loader {
         if (loaded != null) {
             loaded.addReferenceCount();
             return loaded;
+        }
+
+        for (Module module : getLoadedModules()) {
+            for (MemRegion memRegion : module.getRegions()) {
+                if (filename.equals(memRegion.getName())) {
+                    module.addReferenceCount();
+                    return module;
+                }
+            }
         }
 
         LibraryFile file = libraryResolver == null ? null : libraryResolver.resolveLibrary(emulator, filename);
@@ -425,7 +434,7 @@ public class AndroidElfLoader implements Memory, Loader {
                     Alignment alignment = this.mem_map(begin, ph.mem_size, prot, libraryFile.getName());
                     unicorn.mem_write(begin, ph.getPtLoadData());
 
-                    regions.add(new MemRegion(alignment.address, alignment.address + alignment.size, prot, libraryFile.getMapRegionName(), ph.virtual_address));
+                    regions.add(new MemRegion(alignment.address, alignment.address + alignment.size, prot, libraryFile, ph.virtual_address));
 
                     if (unpackHook != null && (prot & UnicornConst.UC_PROT_EXEC) != 0) { // unpack executable code
                         unicorn.hook_add(new WriteHook() {

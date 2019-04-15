@@ -696,7 +696,7 @@ public class ARMSyscallHandler extends AbstractSyscallHandler implements Syscall
     }
 
     private int stat64(Emulator emulator, String pathname, Pointer statbuf) {
-        FileIO io = resolve(emulator.getWorkDir(), pathname, FileIO.O_RDONLY);
+        FileIO io = resolve(emulator, pathname, FileIO.O_RDONLY);
         if (io != null) {
             return io.fstat(emulator, emulator.getUnicorn(), statbuf);
         }
@@ -1198,10 +1198,9 @@ public class ARMSyscallHandler extends AbstractSyscallHandler implements Syscall
 
     private void exit_group(Unicorn u) {
         int status = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
-        if (log.isDebugEnabled()) {
-            log.debug("exit with code: " + status);
-        }
+        log.info("exit with code: " + status);
         u.emu_stop();
+        System.exit(status);
     }
 
     private int munmap(Unicorn u, Emulator emulator) {
@@ -1464,7 +1463,7 @@ public class ARMSyscallHandler extends AbstractSyscallHandler implements Syscall
     }
 
     private int faccessat(Emulator emulator, String pathname) {
-        FileIO io = resolve(emulator.getWorkDir(), pathname, FileIO.O_RDONLY);
+        FileIO io = resolve(emulator, pathname, FileIO.O_RDONLY);
         if (io != null) {
             return 0;
         }
@@ -1552,7 +1551,7 @@ public class ARMSyscallHandler extends AbstractSyscallHandler implements Syscall
     public final int open(Emulator emulator, String pathname, int oflags) {
         int minFd = this.getMinFd();
 
-        FileIO io = resolve(emulator.getWorkDir(), pathname, oflags);
+        FileIO io = resolve(emulator, pathname, oflags);
         if (io != null) {
             this.fdMap.put(minFd, io);
             return minFd;
