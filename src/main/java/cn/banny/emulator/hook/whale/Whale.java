@@ -1,10 +1,10 @@
 package cn.banny.emulator.hook.whale;
 
 import cn.banny.emulator.Emulator;
+import cn.banny.emulator.Module;
+import cn.banny.emulator.Symbol;
 import cn.banny.emulator.hook.BaseHook;
 import cn.banny.emulator.hook.ReplaceCallback;
-import cn.banny.emulator.linux.Module;
-import cn.banny.emulator.linux.Symbol;
 import com.sun.jna.Pointer;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -15,17 +15,17 @@ public class Whale extends BaseHook implements IWhale {
 
     private static final Log log = LogFactory.getLog(Whale.class);
 
-    private static IWhale instance;
-
     public static IWhale getInstance(Emulator emulator) {
-        if (instance == null) {
+        IWhale whale = emulator.get(Whale.class.getName());
+        if (whale == null) {
             try {
-                instance = new Whale(emulator);
+                whale = new Whale(emulator);
+                emulator.set(Whale.class.getName(), whale);
             } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
         }
-        return instance;
+        return whale;
     }
 
     private final Symbol WInlineHookFunction, WImportHookFunction;

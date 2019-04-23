@@ -1,7 +1,6 @@
 package cn.banny.emulator;
 
 import cn.banny.emulator.debugger.Debugger;
-import cn.banny.emulator.linux.Module;
 import cn.banny.emulator.linux.android.dvm.VM;
 import cn.banny.emulator.memory.Memory;
 import cn.banny.emulator.memory.SvcMemory;
@@ -16,7 +15,7 @@ import java.io.IOException;
  * Created by zhkl0228 on 2017/5/2.
  */
 
-public interface Emulator extends Closeable, Disassembler {
+public interface Emulator extends Closeable, Disassembler, ValuePair {
 
     int getPointerSize();
 

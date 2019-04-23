@@ -1,10 +1,10 @@
 package cn.banny.emulator.hook.xhook;
 
 import cn.banny.emulator.Emulator;
+import cn.banny.emulator.Module;
+import cn.banny.emulator.Symbol;
 import cn.banny.emulator.hook.BaseHook;
 import cn.banny.emulator.hook.ReplaceCallback;
-import cn.banny.emulator.linux.Module;
-import cn.banny.emulator.linux.Symbol;
 import com.sun.jna.Pointer;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -15,17 +15,17 @@ public class XHookImpl extends BaseHook implements IxHook {
 
     private static final Log log = LogFactory.getLog(XHookImpl.class);
 
-    private static IxHook instance;
-
     public static IxHook getInstance(Emulator emulator) {
-        if (instance == null) {
+        IxHook ixHook = emulator.get(XHookImpl.class.getName());
+        if (ixHook == null) {
             try {
-                instance = new XHookImpl(emulator);
+                ixHook = new XHookImpl(emulator);
+                emulator.set(XHookImpl.class.getName(), ixHook);
             } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
         }
-        return instance;
+        return ixHook;
     }
 
     private final Symbol xhook_register;

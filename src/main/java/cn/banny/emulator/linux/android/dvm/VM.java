@@ -1,7 +1,7 @@
 package cn.banny.emulator.linux.android.dvm;
 
 import cn.banny.emulator.Emulator;
-import cn.banny.emulator.linux.Module;
+import cn.banny.emulator.Module;
 import com.sun.jna.Pointer;
 
 import java.io.File;

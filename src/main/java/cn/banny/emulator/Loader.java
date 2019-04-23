@@ -1,9 +1,6 @@
 package cn.banny.emulator;
 
 import cn.banny.emulator.hook.HookListener;
-import cn.banny.emulator.linux.Module;
-import cn.banny.emulator.linux.ModuleListener;
-import cn.banny.emulator.linux.Symbol;
 
 import java.io.File;
 import java.io.IOException;
@@ -19,7 +16,9 @@ public interface Loader {
     Module load(LibraryFile libraryFile) throws IOException;
     Module load(LibraryFile libraryFile, boolean forceCallInit) throws IOException;
 
+    @Deprecated
     byte[] unpack(File elfFile) throws IOException;
+
     Module findModuleByAddress(long address);
     Module findModule(String soName);
 

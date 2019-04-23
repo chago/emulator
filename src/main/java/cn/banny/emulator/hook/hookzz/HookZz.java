@@ -1,12 +1,12 @@
 package cn.banny.emulator.hook.hookzz;
 
 import cn.banny.emulator.Emulator;
+import cn.banny.emulator.Module;
+import cn.banny.emulator.Symbol;
 import cn.banny.emulator.arm.Arm64Svc;
 import cn.banny.emulator.arm.ArmSvc;
 import cn.banny.emulator.hook.BaseHook;
 import cn.banny.emulator.hook.ReplaceCallback;
-import cn.banny.emulator.linux.Module;
-import cn.banny.emulator.linux.Symbol;
 import cn.banny.emulator.memory.SvcMemory;
 import com.sun.jna.Pointer;
 import org.apache.commons.logging.Log;
@@ -20,17 +20,17 @@ public class HookZz extends BaseHook implements IHookZz {
 
     private static final Log log = LogFactory.getLog(HookZz.class);
 
-    private static HookZz instance;
-
     public static HookZz getInstance(Emulator emulator) {
-        if (instance == null) {
+        HookZz hookZz = emulator.get(HookZz.class.getName());
+        if (hookZz == null) {
             try {
-                instance = new HookZz(emulator);
+                hookZz = new HookZz(emulator);
+                emulator.set(HookZz.class.getName(), hookZz);
             } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
         }
-        return instance;
+        return hookZz;
     }
 
     private final Symbol zz_enable_arm_arm64_b_branch, zz_disable_arm_arm64_b_branch;
