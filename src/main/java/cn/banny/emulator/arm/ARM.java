@@ -42,7 +42,7 @@ public class ARM {
         showRegs(unicorn, ARM.THUMB_REGS);
     }
 
-    public static void showRegs(Unicorn unicorn, int[] regs) {
+    static void showRegs(Unicorn unicorn, int[] regs) {
         if (regs == null || regs.length < 1) {
             regs = ARM.getAllRegisters(isThumb(unicorn));
         }
@@ -430,7 +430,7 @@ public class ARM {
             Arm64Const.UC_ARM64_REG_NZCV
     };
 
-    public static int[] getRegArgs(Emulator emulator) {
+    private static int[] getRegArgs(Emulator emulator) {
         return emulator.getPointerSize() == 4 ? ARM_ARG_REGS : ARM64_ARG_REGS;
     }
 
@@ -477,9 +477,9 @@ public class ARM {
         }
     }
 
-    private static final Pattern LDR_PATTERN = Pattern.compile("\\w+,\\s\\[pc,\\s#0x(\\w+)]");
+    private static final Pattern LDR_PATTERN = Pattern.compile("\\w+,\\s\\[pc,\\s#(0x)?(\\w+)]");
 
-    public static String assembleDetail(Memory memory, Capstone.CsInsn ins, long address, boolean thumb) {
+    static String assembleDetail(Memory memory, Capstone.CsInsn ins, long address, boolean thumb) {
         return assembleDetail(memory, ins, address, thumb, ' ');
     }
 
@@ -524,7 +524,10 @@ public class ARM {
                     appendAddrValue(sb, addr, thumb, memory);
                 }
             } else if((matcher = LDR_PATTERN.matcher(ins.opStr)).find()) {
-                long addr = ins.address + Long.parseLong(matcher.group(1), 16);
+                String g1 = matcher.group(1);
+                boolean hex = "0x".equals(g1);
+                String g2 = matcher.group(2);
+                long addr = ins.address + (hex ? Long.parseLong(g2, 16) : Long.parseLong(g2));
                 appendAddrValue(sb, addr, thumb, memory);
             }
         }
@@ -542,7 +545,7 @@ public class ARM {
         }
     }
 
-    public static Arguments initArgs(Emulator emulator, Number... arguments) {
+    static Arguments initArgs(Emulator emulator, Number... arguments) {
         Unicorn unicorn = emulator.getUnicorn();
         Memory memory = emulator.getMemory();
 
