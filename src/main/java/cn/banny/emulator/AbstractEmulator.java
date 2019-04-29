@@ -2,13 +2,12 @@ package cn.banny.emulator;
 
 import cn.banny.emulator.arm.Arguments;
 import cn.banny.emulator.debugger.Debugger;
-import cn.banny.emulator.linux.android.dvm.DalvikVM;
-import cn.banny.emulator.linux.android.dvm.DalvikVM64;
-import cn.banny.emulator.linux.android.dvm.VM;
 import cn.banny.emulator.memory.Memory;
 import cn.banny.emulator.memory.MemoryBlock;
 import cn.banny.emulator.memory.MemoryBlockImpl;
+import cn.banny.emulator.memory.SvcMemory;
 import cn.banny.emulator.pointer.UnicornPointer;
+import cn.banny.emulator.spi.Dlfcn;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -53,6 +52,10 @@ public abstract class AbstractEmulator implements Emulator {
     }
 
     protected  abstract Memory createMemory(AbstractSyscallHandler syscallHandler);
+
+    protected abstract Dlfcn createDyld(SvcMemory svcMemory);
+
+    protected abstract AbstractSyscallHandler createSyscallHandler(SvcMemory svcMemory);
 
     @Override
     public void runAsm(String... asm) {
@@ -252,14 +255,9 @@ public abstract class AbstractEmulator implements Emulator {
         return workDir;
     }
 
-    @Override
-    public VM createDalvikVM(File apkFile) {
-        return getPointerSize() == 4 ? new DalvikVM(this, apkFile) : new DalvikVM64(this, apkFile);
-    }
-
-    protected final Number[] eFunc(long begin, Arguments args, long lr) {
+    protected final Number[] eFunc(long begin, Arguments args, long lr, boolean entry) {
         final List<Number> numbers = new ArrayList<>(10);
-        numbers.add(emulate(begin, lr, timeout, true));
+        numbers.add(emulate(begin, lr, timeout, entry));
         numbers.addAll(args.pointers);
         return numbers.toArray(new Number[0]);
     }

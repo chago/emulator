@@ -2,16 +2,16 @@ package cn.banny.emulator.linux;
 
 import cn.banny.auxiliary.Inspector;
 import cn.banny.emulator.*;
-import cn.banny.emulator.arm.ARM;
 import cn.banny.emulator.arm.ARMEmulator;
 import cn.banny.emulator.hook.HookListener;
 import cn.banny.emulator.linux.android.ElfLibraryFile;
-import cn.banny.emulator.file.FileIO;
 import cn.banny.emulator.memory.MemRegion;
-import cn.banny.emulator.memory.Memory;
-import cn.banny.emulator.memory.MemoryBlock;
-import cn.banny.emulator.memory.MemoryBlockImpl;
+import cn.banny.emulator.memory.*;
 import cn.banny.emulator.pointer.UnicornPointer;
+import cn.banny.emulator.spi.AbstractLoader;
+import cn.banny.emulator.spi.InitFunction;
+import cn.banny.emulator.spi.LibraryFile;
+import cn.banny.emulator.spi.Loader;
 import com.sun.jna.Pointer;
 import net.fornwall.jelf.*;
 import org.apache.commons.io.FileUtils;
@@ -387,7 +387,7 @@ public class AndroidElfLoader extends AbstractLoader implements Memory, Loader {
             assert relocationAddr != null;
 
             if (relocation.isAndroid()) {
-                Log log = LogFactory.getLog(soName);
+                Log log = LogFactory.getLog("cn.banny.emulator.linux." + soName);
                 log.debug("symbol=" + symbol + ", type=" + type + ", relocationAddr=" + relocationAddr + ", offset=0x" + Long.toHexString(relocation.offset()) + ", addend=" + relocation.addend());
             }
 
@@ -471,14 +471,14 @@ public class AndroidElfLoader extends AbstractLoader implements Memory, Loader {
             ElfInitArray preInitArray = dynamicStructure.getPreInitArray();
             ElfInitArray initArray = dynamicStructure.getInitArray();
 
-            initFunctionList.add(new InitFunction(load_base, soName, init));
+            initFunctionList.add(new LinuxInitFunction(load_base, soName, init));
 
             if (preInitArray != null) {
-                initFunctionList.add(new InitFunction(load_base, soName, preInitArray));
+                initFunctionList.add(new LinuxInitFunction(load_base, soName, preInitArray));
             }
 
             if (initArray != null) {
-                initFunctionList.add(new InitFunction(load_base, soName, initArray));
+                initFunctionList.add(new LinuxInitFunction(load_base, soName, initArray));
             }
         }
 
@@ -542,89 +542,13 @@ public class AndroidElfLoader extends AbstractLoader implements Memory, Loader {
         return prot;
     }
 
-//    private static final int MAP_SHARED =	0x01;		/* Share changes */
-//    private static final int MAP_PRIVATE =	0x02;		/* Changes are private */
-//    private static final int MAP_TYPE =	0x0f;		/* Mask for type of mapping */
-//    private static final int MAP_FIXED =	0x10;		/* Interpret addr exactly */
-//    private static final int MAP_ANONYMOUS =	0x20;		/* don't use a file */
-
-    private long allocateMapAddress(int length) {
-        Map.Entry<Long, Integer> lastEntry = null;
-        for (Map.Entry<Long, Integer> entry : memoryMap.entrySet()) {
-            if (lastEntry == null) {
-                lastEntry = entry;
-            } else {
-                long mmapAddress = lastEntry.getKey() + lastEntry.getValue();
-                if (mmapAddress + length <= entry.getKey()) {
-                    return mmapAddress;
-                } else {
-                    lastEntry = entry;
-                }
-            }
-        }
-        if (lastEntry != null) {
-            long mmapAddress = lastEntry.getKey() + lastEntry.getValue();
-            if (mmapAddress < mmapBaseAddress) {
-                log.debug("allocateMapAddress mmapBaseAddress=0x" + Long.toHexString(mmapBaseAddress) + ", mmapAddress=0x" + Long.toHexString(mmapAddress));
-                mmapBaseAddress = mmapAddress;
-            }
-        }
-
-        long addr = mmapBaseAddress;
-        mmapBaseAddress += length;
-        return addr;
-    }
-
     @Override
     public MemoryBlock malloc(int length, boolean runtime) {
         if (runtime) {
             return MemoryBlockImpl.alloc(this, length);
+        } else {
+            return MemoryAllocBlock.malloc(emulator, malloc, length);
         }
-
-        long address = malloc.call(emulator, length)[0].intValue() & 0xffffffffL;
-        final UnicornPointer pointer = UnicornPointer.pointer(emulator, address);
-        assert pointer != null;
-        return new MemoryBlock() {
-            @Override
-            public UnicornPointer getPointer() {
-                return pointer;
-            }
-            @Override
-            public boolean isSame(Pointer p) {
-                return pointer.equals(p);
-            }
-            @Override
-            public void free() {
-                throw new UnsupportedOperationException();
-            }
-        };
-    }
-
-    private static final int MAP_ANONYMOUS = 0x20;
-
-    @Override
-    public int mmap2(long start, int length, int prot, int flags, int fd, int offset) {
-        int aligned = (int) ARM.alignSize(length, emulator.getPageAlign());
-
-        if (((flags & MAP_ANONYMOUS) != 0) || (start == 0 && fd == -1 && offset == 0)) {
-            long addr = allocateMapAddress(aligned);
-            log.debug("mmap2 addr=0x" + Long.toHexString(addr) + ", mmapBaseAddress=0x" + Long.toHexString(mmapBaseAddress) + ", start=" + start + ", fd=" + fd + ", offset=" + offset + ", aligned=" + aligned);
-            unicorn.mem_map(addr, aligned, prot);
-            memoryMap.put(addr, aligned);
-            return (int) addr;
-        }
-        try {
-            FileIO file;
-            if (start == 0 && fd >= 0 && (file = syscallHandler.fdMap.get(fd)) != null) {
-                long addr = allocateMapAddress(aligned);
-                log.debug("mmap2 addr=0x" + Long.toHexString(addr) + ", mmapBaseAddress=0x" + Long.toHexString(mmapBaseAddress));
-                return file.mmap2(unicorn, addr, aligned, prot, offset, length, memoryMap);
-            }
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
-        }
-
-        throw new AbstractMethodError("mmap2 start=0x" + Long.toHexString(start) + ", length=" + length + ", prot=0x" + Integer.toHexString(prot) + ", flags=0x" + Integer.toHexString(flags) + ", fd=" + fd + ", offset=" + offset);
     }
 
     private long brk;

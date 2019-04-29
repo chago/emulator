@@ -1,5 +1,6 @@
-package cn.banny.emulator;
+package cn.banny.emulator.spi;
 
+import cn.banny.emulator.Emulator;
 import cn.banny.emulator.file.IOResolver;
 import unicorn.InterruptHook;
 
@@ -9,6 +10,8 @@ import unicorn.InterruptHook;
  */
 
 public interface SyscallHandler extends InterruptHook {
+
+    int IOS_SYS_CALL_NUM = 0x80;
 
     /**
      * 后面添加的优先级高

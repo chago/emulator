@@ -1,4 +1,6 @@
-package cn.banny.emulator;
+package cn.banny.emulator.spi;
+
+import cn.banny.emulator.Emulator;
 
 import java.io.IOException;
 
@@ -11,5 +13,7 @@ public interface LibraryFile {
     LibraryFile resolveLibrary(Emulator emulator, String soName) throws IOException;
 
     byte[] readToByteArray() throws IOException;
+
+    String getPath();
 
 }

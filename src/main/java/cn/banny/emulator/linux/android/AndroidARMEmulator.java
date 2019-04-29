@@ -1,18 +1,24 @@
 package cn.banny.emulator.linux.android;
 
 import cn.banny.emulator.AbstractSyscallHandler;
+import cn.banny.emulator.linux.ARMSyscallHandler;
+import cn.banny.emulator.spi.Dlfcn;
 import cn.banny.emulator.arm.AbstractARMEmulator;
 import cn.banny.emulator.linux.AndroidElfLoader;
+import cn.banny.emulator.linux.android.dvm.DalvikVM;
+import cn.banny.emulator.linux.android.dvm.VM;
 import cn.banny.emulator.memory.Memory;
+import cn.banny.emulator.memory.SvcMemory;
+import cn.banny.emulator.spi.LibraryFile;
 import keystone.Keystone;
 import keystone.KeystoneArchitecture;
 import keystone.KeystoneEncoded;
 import keystone.KeystoneMode;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import unicorn.UnicornConst;
 
-import java.nio.ByteBuffer;
+import java.io.File;
+import java.net.URL;
 import java.util.Arrays;
 
 /**
@@ -30,8 +36,6 @@ public class AndroidARMEmulator extends AbstractARMEmulator {
 
     public AndroidARMEmulator(String processName) {
         super(processName);
-
-        setupTraps();
     }
 
     @Override
@@ -39,22 +43,30 @@ public class AndroidARMEmulator extends AbstractARMEmulator {
         return new AndroidElfLoader(this, syscallHandler);
     }
 
+    @Override
+    protected Dlfcn createDyld(SvcMemory svcMemory) {
+        return new ArmLD(unicorn, svcMemory);
+    }
+
+    @Override
+    protected AbstractSyscallHandler createSyscallHandler(SvcMemory svcMemory) {
+        return new ARMSyscallHandler(svcMemory);
+    }
+
+    @Override
+    public VM createDalvikVM(File apkFile) {
+        return new DalvikVM(this, apkFile);
+    }
+
     /**
      * https://github.com/lunixbochs/usercorn/blob/master/go/arch/arm/linux.go
      */
-    private void setupTraps() {
-        try (Keystone keystone = new Keystone(KeystoneArchitecture.Arm, KeystoneMode.Arm)) {
-            unicorn.mem_map(LR, 0x10000, UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_EXEC);
-            KeystoneEncoded encoded = keystone.assemble("mov pc, #0");
-            byte[] b0 = encoded.getMachineCode();
-            ByteBuffer buffer = ByteBuffer.allocate(0x10000);
-            // write "mov pc, #0" to all kernel trap addresses so they will throw exception
-            for (int i = 0; i < 0x10000; i += 4) {
-                buffer.put(b0);
-            }
-            unicorn.mem_write(LR, buffer.array());
+    @Override
+    protected final void setupTraps() {
+        super.setupTraps();
 
-            encoded = keystone.assemble("bx lr", 0xffff0fa0);
+        try (Keystone keystone = new Keystone(KeystoneArchitecture.Arm, KeystoneMode.Arm)) {
+            KeystoneEncoded encoded = keystone.assemble("bx lr", 0xffff0fa0);
             byte[] __kuser_memory_barrier = encoded.getMachineCode();
 
             encoded = keystone.assemble(Arrays.asList(
@@ -83,4 +95,18 @@ public class AndroidARMEmulator extends AbstractARMEmulator {
         }
     }
 
+    @Override
+    public String getLibraryExtension() {
+        return ".so";
+    }
+
+    @Override
+    public String getLibraryPath() {
+        return "/android/lib/armeabi-v7a/";
+    }
+
+    @Override
+    public LibraryFile createURLibraryFile(URL url, String libName) {
+        return new URLibraryFile(url, libName, -1);
+    }
 }
