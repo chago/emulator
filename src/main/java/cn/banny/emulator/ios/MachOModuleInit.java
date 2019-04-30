@@ -13,8 +13,15 @@ class MachOModuleInit extends InitFunction {
 
     private static final Log log = LogFactory.getLog(MachOModuleInit.class);
 
-    MachOModuleInit(long load_base, String libName, long... addresses) {
+    private final UnicornPointer envp;
+    private final UnicornPointer apple;
+    private final UnicornPointer vars;
+
+    MachOModuleInit(long load_base, String libName, UnicornPointer envp, UnicornPointer apple, UnicornPointer vars, long... addresses) {
         super(load_base, libName, addresses);
+        this.envp = envp;
+        this.apple = apple;
+        this.vars = vars;
     }
 
     /**
@@ -23,13 +30,11 @@ class MachOModuleInit extends InitFunction {
     public void call(Emulator emulator) {
         for (long addr : addresses) {
             log.debug("[" + libName + "]CallInitFunction: 0x" + Long.toHexString(addr));
-            if ("libc++.1.dylib".equals(libName)) {
-                // emulator.attach().addBreakPoint(null, load_base + 0x001ad5);
-                emulator.traceCode();
-            }
-            // emulator.attach().addBreakPoint(null, 0x401d68d8);
+//          emulator.attach().addBreakPoint(null, 0x402979aa);
+//          emulator.attach().addBreakPoint(null, 0x4030116c);
+//            emulator.traceCode();
             long start = System.currentTimeMillis();
-            callModInit(emulator, load_base + addr, 0, null, null, null, null);
+            callModInit(emulator, load_base + addr, 0, null, envp, apple, vars);
             if (log.isDebugEnabled()) {
                 System.err.println("[" + libName + "]CallInitFunction: 0x" + Long.toHexString(addr) + ", offset=" + (System.currentTimeMillis() - start) + "ms");
             }
@@ -44,7 +49,7 @@ class MachOModuleInit extends InitFunction {
         list.add(envp == null ? 0 : envp.peer);
         list.add(apple == null ? 0 : apple.peer);
         list.add(vars == null ? 0 : vars.peer);
-        emulator.eInit(address, list.toArray(new Number[0]));
+        emulator.eFunc(address, list.toArray(new Number[0]));
     }
 
 }
