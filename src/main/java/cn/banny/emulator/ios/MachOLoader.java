@@ -8,6 +8,7 @@ import cn.banny.emulator.pointer.UnicornPointer;
 import cn.banny.emulator.spi.AbstractLoader;
 import cn.banny.emulator.spi.LibraryFile;
 import cn.banny.emulator.spi.Loader;
+import cn.banny.emulator.unix.UnixSyscallHandler;
 import com.sun.jna.Pointer;
 import io.kaitai.MachO;
 import io.kaitai.struct.ByteBufferKaitaiStream;
@@ -42,7 +43,21 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
     private UnicornPointer vars;
 
     private void initializeTLS() {
+        final Pointer environ = allocateStack(emulator.getPointerSize());
+        assert environ != null;
+        environ.setPointer(0, null);
+
+        Pointer _NSGetEnviron = allocateStack(emulator.getPointerSize());
+        _NSGetEnviron.setPointer(0, environ);
+
+        final Pointer programName = writeStackString(emulator.getProcessName());
+        Pointer _NSGetProgname = allocateStack(emulator.getPointerSize());
+        _NSGetProgname.setPointer(0, programName);
+
         vars = allocateStack(emulator.getPointerSize() * 5);
+        vars.setPointer(0, null); // _NSGetMachExecuteHeader
+        vars.setPointer(0xc, _NSGetEnviron);
+        vars.setPointer(0x10, _NSGetProgname);
 
         final Pointer thread = allocateStack(0x400); // reserve space for pthread_internal_t
 
@@ -55,7 +70,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         } else {
             unicorn.reg_write(Arm64Const.UC_ARM64_REG_TPIDR_EL0, tls.peer);
         }
-        log.debug("initializeTLS tls=" + tls + ", thread=" + thread);
+        log.debug("initializeTLS tls=" + tls + ", thread=" + thread + ", environ=" + environ + ", vars=" + vars);
     }
 
     @Override
@@ -373,9 +388,13 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
                 MachOLoader.log.debug(msg);
             }
         }
+
         long load_size = size;
         MachOModule module = new MachOModule(machO, dyId, load_base, load_size, new HashMap<String, Module>(neededLibraries), regions,
                 symtabCommand, dysymtabCommand, buffer, lazyLoadNeededList, upwardLibraries, exportModules, dylibPath, emulator, dyldInfoCommand, null, null, vars);
+        if (modules.isEmpty()) { // first module
+            vars.setPointer(0, UnicornPointer.pointer(emulator, module.base)); // _NSGetMachExecuteHeader
+        }
         modules.put(dyId, module);
 
         for (MachOModule export : modules.values()) {
@@ -396,7 +415,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
             }
         }
 
-        processDyldInfo(module);
+        processRebase(log, module);
 
         if ("libsystem_malloc.dylib".equals(dyId)) {
             malloc = module.findSymbolByName("_malloc");
@@ -417,79 +436,17 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         return module;
     }
 
-    private void processExportNode(Log log, ByteBuffer buffer, byte[] cummulativeString, int curStrOffset) {
-        int terminalSize = Utils.readULEB128(buffer).intValue();
-
-        if (terminalSize != 0) {
-            buffer.mark();
-            int flags = Utils.readULEB128(buffer).intValue();
-            long address;
-            long other;
-            String importName;
-            if ((flags & EXPORT_SYMBOL_FLAGS_REEXPORT) != 0) {
-                address = 0;
-                other = Utils.readULEB128(buffer).longValue();
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                byte b;
-                while ((b = buffer.get()) != 0) {
-                    baos.write(b);
-                }
-                importName = baos.toString();
-            } else {
-                address = Utils.readULEB128(buffer).longValue();
-                if((flags & EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER) != 0) {
-                    other = Utils.readULEB128(buffer).longValue();
-                } else {
-                    other = 0;
-                }
-                importName = null;
-            }
-            if (log.isDebugEnabled()) {
-                String symbolName = new String(cummulativeString, 0, curStrOffset);
-                log.debug("exportNode symbolName=" + symbolName + ", address=0x" + Long.toHexString(address) + ", other=0x" + Long.toHexString(other) + ", importName=" + importName);
-            }
-            buffer.reset();
-            buffer.position(buffer.position() + terminalSize);
-        }
-
-        int childrenCount = buffer.get() & 0xff;
-        for (int i = 0; i < childrenCount; i++) {
-            int edgeStrLen = 0;
-            byte b;
-            while ((b = buffer.get()) != 0) {
-                cummulativeString[curStrOffset+edgeStrLen] = b;
-                ++edgeStrLen;
-            }
-            cummulativeString[curStrOffset+edgeStrLen] = 0;
-
-            int childNodeOffset = Utils.readULEB128(buffer).intValue();
-
-            ByteBuffer duplicate = buffer.duplicate();
-            duplicate.position(childNodeOffset);
-            processExportNode(log, duplicate, cummulativeString, curStrOffset+edgeStrLen);
-        }
-    }
-
-    private void processDyldInfo(MachOModule module) {
+    private void processRebase(Log log, MachOModule module) {
         MachO.DyldInfoCommand dyldInfoCommand = module.dyldInfoCommand;
         if (dyldInfoCommand == null) {
             return;
         }
-
-        Log log = LogFactory.getLog("cn.banny.emulator.ios." + module.name);
 
         if (dyldInfoCommand.rebaseSize() > 0) {
             ByteBuffer buffer = module.buffer.duplicate();
             buffer.limit((int) (dyldInfoCommand.rebaseOff() + dyldInfoCommand.rebaseSize()));
             buffer.position((int) dyldInfoCommand.rebaseOff());
             rebase(log, buffer.slice(), module);
-        }
-
-        if (dyldInfoCommand.exportSize() > 0) {
-            ByteBuffer buffer = module.buffer.duplicate();
-            buffer.limit((int) (dyldInfoCommand.exportOff() + dyldInfoCommand.exportSize()));
-            buffer.position((int) dyldInfoCommand.exportOff());
-            processExportNode(log, buffer.slice(), new byte[4000], 0);
         }
     }
 
@@ -887,11 +844,8 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
     private void doBindAt(Log log, long libraryOrdinal, int type, long address, String symbolName, int symbolFlags, long addend, MachOModule module, boolean lazy) throws IOException {
         Symbol symbol = module.findSymbolByName(symbolName, true);
         if (symbol == null) {
-            log.warn("doBindAt type=" + type + ", symbolName=" + symbolName + ", address=0x" + Long.toHexString(address - module.base) + ", lazy=" + lazy + ", upwardLibraries=" + module.upwardLibraries);
+            log.warn("doBindAt type=" + type + ", symbolName=" + symbolName + ", address=0x" + Long.toHexString(address - module.base) + ", lazy=" + lazy + ", upwardLibraries=" + module.upwardLibraries + ", libraryOrdinal=" + libraryOrdinal);
             return;
-        }
-        if (log.isDebugEnabled()) {
-            log.debug("doBindAt libraryOrdinal=" + libraryOrdinal + ", type=" + type + ", symbolName=" + symbolName + ", symbolFlags=" + symbolFlags + ", addend=" + addend + ", address=0x" + Long.toHexString(address - module.base) + ", lazy=" + lazy + ", symbol=" + symbol);
         }
         Pointer pointer = UnicornPointer.pointer(emulator, address);
         if (pointer == null) {
@@ -905,6 +859,10 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
                 bindAt = hook;
                 break;
             }
+        }
+
+        if (log.isDebugEnabled()) {
+            log.debug("doBindAt 0x=" + Long.toHexString(bindAt) + ", type=" + type + ", symbolName=" + symbolName + ", symbolFlags=" + symbolFlags + ", addend=" + addend + ", address=0x" + Long.toHexString(address - module.base) + ", lazy=" + lazy + ", symbol=" + symbol);
         }
 
         Pointer newPointer = UnicornPointer.pointer(emulator, bindAt);
@@ -1027,5 +985,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
     public boolean hasThread(int threadId) {
         throw new UnsupportedOperationException();
     }
+
+    final List<UnicornPointer> addImageCallbacks = new ArrayList<>();
 
 }

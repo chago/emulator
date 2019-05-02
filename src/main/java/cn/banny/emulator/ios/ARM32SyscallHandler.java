@@ -1,22 +1,29 @@
 package cn.banny.emulator.ios;
 
+import cn.banny.auxiliary.Inspector;
 import cn.banny.emulator.Emulator;
 import cn.banny.emulator.StopEmulatorException;
 import cn.banny.emulator.Svc;
-import cn.banny.emulator.UnixSyscallHandler;
 import cn.banny.emulator.arm.ARM;
+import cn.banny.emulator.arm.ARMEmulator;
 import cn.banny.emulator.arm.Cpsr;
 import cn.banny.emulator.file.FileIO;
+import cn.banny.emulator.ios.file.LocalDarwinUdpSocket;
 import cn.banny.emulator.ios.struct.*;
-import cn.banny.emulator.linux.LinuxEmulator;
 import cn.banny.emulator.memory.SvcMemory;
 import cn.banny.emulator.pointer.UnicornPointer;
 import cn.banny.emulator.spi.SyscallHandler;
+import cn.banny.emulator.unix.UnixEmulator;
+import cn.banny.emulator.unix.UnixSyscallHandler;
+import cn.banny.emulator.unix.file.SocketIO;
+import cn.banny.emulator.unix.file.TcpSocket;
+import cn.banny.emulator.unix.file.UdpSocket;
 import com.sun.jna.Pointer;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import unicorn.ArmConst;
 import unicorn.Unicorn;
+import unicorn.UnicornConst;
 import unicorn.UnicornException;
 
 /**
@@ -65,15 +72,22 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
             }
 
             if (intno == 2) {
+                Cpsr.getArm(u).setCarry(false);
                 switch (NR) {
                     case -3:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, mach_absolute_time(emulator));
+                        return;
+                    case -10:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, _kernelrpc_mach_vm_allocate_trap(emulator));
+                        return;
+                    case -12:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, _kernelrpc_mach_vm_deallocate_trap(emulator));
                         return;
                     case -15:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, _kernelrpc_mach_vm_map_trap(emulator));
                         return;
                     case -18:
-                        u.reg_write(ArmConst.UC_ARM_REG_R0, _kernelrpc_mach_port_deallocate_trap());
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, _kernelrpc_mach_port_deallocate_trap(emulator));
                         return;
                     case -26: // mach_port_t mach_reply_port(...)
                         u.reg_write(ArmConst.UC_ARM_REG_R0, mach_reply_port());
@@ -90,23 +104,54 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
                     case -31:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, mach_msg_trap(emulator));
                         return;
+                    case 4:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, write(u, emulator));
+                        return;
                     case 20:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, getpid(emulator));
+                        return;
+                    case 24: // getuid
+                    case 47: // getgid
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, 0);
+                        return;
+                    case 46:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, sigaction(u, emulator));
                         return;
                     case 48:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, sigprocmask(u, emulator));
                         return;
+                    case 74:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, mprotect(u, emulator));
+                        return;
+                    case 92:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, fcntl(u, emulator));
+                        return;
+                    case 97:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, socket(u, emulator));
+                        return;
+                    case 98:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, connect(u, emulator));
+                        return;
                     case 116:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, gettimeofday(emulator));
                         return;
+                    case 133:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, sendto(u, emulator));
+                        return;
+                    case 197:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, mmap(u, emulator));
+                        return;
                     case 202:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, sysctl());
+                        return;
+                    case 329:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, pthread_sigmask(emulator));
                         return;
                     case 366:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, bsdthread_register(emulator));
                         return;
                     case 372:
-                        u.reg_write(ArmConst.UC_ARM_REG_R0, thread_selfid(emulator));
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, thread_selfid());
                         return;
                     case 381:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, sandbox_ms());
@@ -119,6 +164,9 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
                         return;
                     case 399:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, close_NOCANCEL(emulator));
+                        return;
+                    case 423:
+                        u.reg_write(ArmConst.UC_ARM_REG_R0, semwait_signal_nocancel());
                         return;
                     case 0x80000000:
                         u.reg_write(ArmConst.UC_ARM_REG_R0, semaphore_signal_trap());
@@ -144,43 +192,94 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
         }
     }
 
+    private int semwait_signal_nocancel() {
+        // TODO: implement
+        log.info("semwait_signal_nocancel");
+        return 0;
+    }
+
+    private int pthread_sigmask(Emulator emulator) {
+        Unicorn unicorn = emulator.getUnicorn();
+        int how = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        Pointer set = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+        Pointer oset = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R2);
+        if (log.isDebugEnabled()) {
+            log.debug("pthread_sigmask how=" + how + ", set=" + set + ", oset=" + oset);
+        }
+        return 0;
+    }
+
     private int sandbox_ms() {
         // TODO: implement
-        log.debug("sandbox_ms");
+        log.info("sandbox_ms");
         return 0;
     }
 
     private int bsdthread_register(Emulator emulator) {
         // TODO: implement
-        log.debug("bsdthread_register");
-        Unicorn unicorn = emulator.getUnicorn();
-        Cpsr.getArm(unicorn).setCarry(false);
+        log.info("bsdthread_register");
         return 0;
     }
 
     private int semaphore_signal_trap() {
         // TODO: implement
-        log.debug("semaphore_signal_trap");
+        log.info("semaphore_signal_trap");
         return 0;
     }
 
     private int sysctl() {
         // TODO: implement
-        log.debug("sysctl");
+        log.info("sysctl");
         return 0;
     }
 
-    private int _kernelrpc_mach_port_deallocate_trap() {
-        // TODO: implement
-        log.debug("_kernelrpc_mach_port_deallocate_trap");
+    private int _kernelrpc_mach_vm_deallocate_trap(Emulator emulator) {
+        Unicorn unicorn = emulator.getUnicorn();
+        int target = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        long r1 = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R1)).intValue();
+        long r2 = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
+        long address = r1 | (r2 << 32);
+        long r3 = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R3)).intValue();
+        long r4 = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R4)).intValue();
+        long size = r3 | (r4 << 32);
+
+        if (log.isDebugEnabled()) {
+            log.debug("_kernelrpc_mach_vm_deallocate_trap target=" + target + ", address=0x" + Long.toHexString(address) + ", size=" + size);
+        }
+        emulator.getMemory().munmap(address, (int) size);
+        return 0;
+    }
+
+    private int _kernelrpc_mach_vm_allocate_trap(Emulator emulator) {
+        Unicorn unicorn = emulator.getUnicorn();
+        int target = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        Pointer address = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+        long r2 = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
+        long r3 = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R3)).intValue();
+        long size = r2 | (r3 << 32);
+        int flags = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R4)).intValue();
+
+        if (log.isDebugEnabled()) {
+            log.debug("_kernelrpc_mach_vm_allocate_trap target=" + target + ", address=" + address + ", size=" + size + ", flags=" + flags);
+        }
+        UnicornPointer pointer = emulator.getMemory().mmap((int) size, UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE);
+        address.setPointer(0, pointer);
+        return 0;
+    }
+
+    private int _kernelrpc_mach_port_deallocate_trap(Emulator emulator) {
+        Unicorn unicorn = emulator.getUnicorn();
+        int task = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        int name = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R1)).intValue();
+        if (log.isDebugEnabled()) {
+            log.debug("_kernelrpc_mach_port_deallocate_trap task=" + task + ", name=" + name);
+        }
         return 0;
     }
 
     // https://github.com/lunixbochs/usercorn/blob/master/go/kernel/mach/thread.go
-    private int thread_selfid(Emulator emulator) {
+    private int thread_selfid() {
         log.debug("thread_selfid");
-        Unicorn unicorn = emulator.getUnicorn();
-        Cpsr.getArm(unicorn).setCarry(false);
         return 1;
     }
 
@@ -422,7 +521,7 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
             file.close();
             return 0;
         } else {
-            emulator.getMemory().setErrno(LinuxEmulator.EBADF);
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
     }
@@ -457,6 +556,137 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
         int pid = emulator.getPid();
         log.debug("getpid pid=" + pid);
         return pid;
+    }
+
+    private int sendto(Unicorn u, Emulator emulator) {
+        int sockfd = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        Pointer buf = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+        int len = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
+        int flags = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R3)).intValue();
+        Pointer dest_addr = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R4);
+        int addrlen = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R5)).intValue();
+
+        return sendto(emulator, sockfd, buf, len, flags, dest_addr, addrlen);
+    }
+
+    private int connect(Unicorn u, Emulator emulator) {
+        int sockfd = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        Pointer addr = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+        int addrlen = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
+        return connect(emulator, sockfd, addr, addrlen);
+    }
+
+    private int sigaction(Unicorn u, Emulator emulator) {
+        int signum = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        Pointer act = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+        Pointer oldact = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R2);
+
+        return sigaction(signum, act, oldact);
+    }
+
+    private int fcntl(Unicorn u, Emulator emulator) {
+        int fd = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        int cmd = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R1)).intValue();
+        int arg = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
+        return fcntl(emulator, fd, cmd, arg);
+    }
+
+    private static final int MMAP2_SHIFT = 12;
+
+    private int mmap(Unicorn u, Emulator emulator) {
+        UnicornPointer addr = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
+        int length = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R1)).intValue();
+        int prot = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
+        int flags = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R3)).intValue();
+        int fd = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R4)).intValue();
+        int offset = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R5)).intValue() << MMAP2_SHIFT;
+
+        boolean warning = length >= 0x10000000;
+        if (log.isDebugEnabled() || warning) {
+            String msg = "mmap addr=" + addr + ", length=" + length + ", prot=0x" + Integer.toHexString(prot) + ", flags=0x" + Integer.toHexString(flags) + ", fd=" + fd + ", offset=" + offset;
+            if (warning) {
+                log.warn(msg);
+            } else {
+                log.debug(msg);
+            }
+        }
+        return emulator.getMemory().mmap2(addr == null ? 0 : addr.peer, length, prot, flags, fd, offset);
+    }
+
+    private int socket(Unicorn u, Emulator emulator) {
+        int domain = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        int type = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R1)).intValue() & 0x7ffff;
+        int protocol = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
+        if (log.isDebugEnabled()) {
+            log.debug("socket domain=" + domain + ", type=" + type + ", protocol=" + protocol);
+        }
+
+        if (protocol == SocketIO.IPPROTO_ICMP) {
+            throw new UnsupportedOperationException();
+        }
+
+        int fd;
+        switch (domain) {
+            case SocketIO.AF_UNSPEC:
+                throw new UnsupportedOperationException();
+            case SocketIO.AF_LOCAL:
+                switch (type) {
+                    case SocketIO.SOCK_DGRAM:
+                        fd = getMinFd();
+                        fdMap.put(fd, new LocalDarwinUdpSocket(emulator));
+                        return fd;
+                    default:
+                        emulator.getMemory().setErrno(UnixEmulator.EACCES);
+                        return -1;
+                }
+            case SocketIO.AF_INET:
+            case SocketIO.AF_INET6:
+                switch (type) {
+                    case SocketIO.SOCK_STREAM:
+                        fd = getMinFd();
+                        fdMap.put(fd, new TcpSocket(emulator));
+                        return fd;
+                    case SocketIO.SOCK_DGRAM:
+                        fd = getMinFd();
+                        fdMap.put(fd, new UdpSocket(emulator));
+                        return fd;
+                    case SocketIO.SOCK_RAW:
+                        throw new UnsupportedOperationException();
+                }
+                break;
+        }
+        throw new UnsupportedOperationException("socket domain=" + domain + ", type=" + type + ", protocol=" + protocol);
+    }
+
+    private int write(Unicorn u, Emulator emulator) {
+        int fd = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
+        Pointer buffer = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+        int count = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
+        byte[] data = buffer.getByteArray(0, count);
+        if (log.isDebugEnabled()) {
+            Inspector.inspect(data, "write fd=" + fd + ", buffer=" + buffer + ", count=" + count);
+        }
+
+        FileIO file = fdMap.get(fd);
+        if (file == null) {
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
+            return -1;
+        }
+        return file.write(data);
+    }
+
+    private int mprotect(Unicorn u, Emulator emulator) {
+        long address = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R0)).intValue() & 0xffffffffL;
+        long length = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R1)).intValue();
+        int prot = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
+        long alignedAddress = address / ARMEmulator.PAGE_ALIGN * ARMEmulator.PAGE_ALIGN; // >> 12 << 12;
+        long offset = address - alignedAddress;
+
+        long alignedLength = ARM.alignSize(length + offset, emulator.getPageAlign());
+        if (log.isDebugEnabled()) {
+            log.debug("mprotect address=0x" + Long.toHexString(address) + ", alignedAddress=0x" + Long.toHexString(alignedAddress) + ", offset=" + offset + ", length=" + length + ", alignedLength=" + alignedLength + ", prot=0x" + Integer.toHexString(prot));
+        }
+        return emulator.getMemory().mprotect(alignedAddress, (int) alignedLength, prot);
     }
 
 }

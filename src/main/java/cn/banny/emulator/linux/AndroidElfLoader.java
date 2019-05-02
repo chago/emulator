@@ -1,7 +1,10 @@
 package cn.banny.emulator.linux;
 
 import cn.banny.auxiliary.Inspector;
-import cn.banny.emulator.*;
+import cn.banny.emulator.Alignment;
+import cn.banny.emulator.Emulator;
+import cn.banny.emulator.Module;
+import cn.banny.emulator.Symbol;
 import cn.banny.emulator.arm.ARMEmulator;
 import cn.banny.emulator.hook.HookListener;
 import cn.banny.emulator.linux.android.ElfLibraryFile;
@@ -12,6 +15,7 @@ import cn.banny.emulator.spi.AbstractLoader;
 import cn.banny.emulator.spi.InitFunction;
 import cn.banny.emulator.spi.LibraryFile;
 import cn.banny.emulator.spi.Loader;
+import cn.banny.emulator.unix.UnixSyscallHandler;
 import com.sun.jna.Pointer;
 import net.fornwall.jelf.*;
 import org.apache.commons.io.FileUtils;
@@ -128,7 +132,7 @@ public class AndroidElfLoader extends AbstractLoader implements Memory, Loader {
     @Override
     public byte[] unpack(File elfFile) throws IOException {
         final byte[] fileData = FileUtils.readFileToByteArray(elfFile);
-        loadInternal(new ElfLibraryFile(elfFile), new WriteHook() {
+        LinuxModule module = loadInternal(new ElfLibraryFile(elfFile), new WriteHook() {
             @Override
             public void hook(Unicorn u, long address, int size, long value, Object user) {
                 byte[] data = Arrays.copyOf(ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(value).array(), size);
@@ -138,6 +142,7 @@ public class AndroidElfLoader extends AbstractLoader implements Memory, Loader {
                 System.arraycopy(data, 0, fileData, (int) address, data.length);
             }
         }, true);
+        emulator.createDalvikVM(null).callJNI_OnLoad(emulator, module);
         return fileData;
     }
 
