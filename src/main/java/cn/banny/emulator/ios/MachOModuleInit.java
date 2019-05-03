@@ -30,9 +30,9 @@ class MachOModuleInit extends InitFunction {
     public void call(Emulator emulator) {
         for (long addr : addresses) {
             log.debug("[" + libName + "]CallInitFunction: 0x" + Long.toHexString(addr));
-//          emulator.attach().addBreakPoint(null, 0x402979aa);
-//          emulator.attach().addBreakPoint(null, 0x4030116c);
-            if ("libc++.1.dylib".equals(libName)) {
+//            emulator.attach().addBreakPoint(null, 0x400d60e0);
+            emulator.attach().addBreakPoint(null, 0x4030117e);
+            if ("libSystem.B.dylib".equals(libName)) {
 //                emulator.traceCode();
             }
             long start = System.currentTimeMillis();
