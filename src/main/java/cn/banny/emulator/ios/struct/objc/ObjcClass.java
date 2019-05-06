@@ -15,15 +15,19 @@ public class ObjcClass extends UnicornStructure {
         super(p);
     }
 
-    public int metaClass;
-    public int superClass;
-    public int cache;
-    public int vtable;
-    public int data;
+    public Pointer isa;
+    public Pointer superClass;
+    public Pointer cache;
+    public Pointer vtable;
+    public Pointer data;
 
     @Override
     protected List<String> getFieldOrder() {
-        return Arrays.asList("metaClass", "superClass", "cache", "vtable", "data");
+        return Arrays.asList("isa", "superClass", "cache", "vtable", "data");
+    }
+
+    public void setData(ClassRW classRW) {
+        data = classRW.getPointer();
     }
 
 }

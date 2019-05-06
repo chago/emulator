@@ -2,6 +2,8 @@ package cn.banny.emulator.ios;
 
 import cn.banny.emulator.Emulator;
 import cn.banny.emulator.Symbol;
+import cn.banny.emulator.memory.SvcMemory;
+import cn.banny.emulator.pointer.UnicornPointer;
 import io.kaitai.MachO;
 
 public class MachOSymbol extends Symbol implements cn.banny.emulator.ios.MachO {
@@ -41,4 +43,17 @@ public class MachOSymbol extends Symbol implements cn.banny.emulator.ios.MachO {
     public String getModuleName() {
         return module.name;
     }
+
+    private UnicornPointer namePointer;
+
+    UnicornPointer createNameMemory(SvcMemory svcMemory) {
+        if (namePointer == null) {
+            byte[] name = getName().getBytes();
+            namePointer = svcMemory.allocate(name.length + 1);
+            namePointer.write(0, name, 0, name.length);
+            namePointer.setByte(name.length, (byte) 0);
+        }
+        return namePointer;
+    }
+
 }

@@ -1,10 +1,13 @@
 package cn.banny.emulator.ios;
 
+import cn.banny.auxiliary.Inspector;
 import cn.banny.emulator.*;
 import cn.banny.emulator.memory.MemRegion;
-import cn.banny.emulator.memory.MemoryBlock;
+import cn.banny.emulator.memory.Memory;
+import cn.banny.emulator.memory.SvcMemory;
 import cn.banny.emulator.pointer.UnicornPointer;
 import cn.banny.emulator.spi.InitFunction;
+import com.sun.jna.Pointer;
 import io.kaitai.MachO;
 import io.kaitai.struct.ByteBufferKaitaiStream;
 import org.apache.commons.logging.Log;
@@ -26,10 +29,10 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
     final List<NeedLibrary> lazyLoadNeededList;
     final Map<String, Module> upwardLibraries;
     private final Map<String, MachOModule> exportModules;
-    final String path;
+    private final String path;
     final MachO.DyldInfoCommand dyldInfoCommand;
 
-    private final List<InitFunction> initFunctionList;
+    final List<InitFunction> initFunctionList;
 
     boolean indirectSymbolBound;
     boolean lazyPointerProcessed;
@@ -42,7 +45,8 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
     MachOModule(MachO machO, String name, long base, long size, Map<String, Module> neededLibraries, List<MemRegion> regions,
                 MachO.SymtabCommand symtabCommand, MachO.DysymtabCommand dysymtabCommand, ByteBuffer buffer,
                 List<NeedLibrary> lazyLoadNeededList, Map<String, Module> upwardLibraries, Map<String, MachOModule> exportModules,
-                String path, Emulator emulator, MachO.DyldInfoCommand dyldInfoCommand, UnicornPointer envp, UnicornPointer apple, UnicornPointer vars) {
+                String path, Emulator emulator, MachO.DyldInfoCommand dyldInfoCommand, UnicornPointer envp, UnicornPointer apple, UnicornPointer vars,
+                MachOLoader loader) {
         super(name, base, size, neededLibraries, regions);
         this.machO = machO;
         this.symtabCommand = symtabCommand;
@@ -57,8 +61,10 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
         this.apple = apple;
         this.vars = vars;
 
-        log = LogFactory.getLog("cn.banny.emulator.ios." + name);
-        final Collection<String> exportSymbols = processExportNode(log, dyldInfoCommand, buffer);
+        this.log = LogFactory.getLog("cn.banny.emulator.ios." + name);
+        this.initFunctionList = parseInitFunction(machO, buffer.duplicate(), base, name, emulator, loader);
+
+        final Map<String, ExportSymbol> exportSymbols = processExportNode(log, dyldInfoCommand, buffer);
 
         if (symtabCommand != null) {
             buffer.limit((int) (symtabCommand.strOff() + symtabCommand.strSize()));
@@ -76,12 +82,21 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
                 strBuffer.position((int) nlist.un());
                 String symbolName = new String(io.readBytesTerm(0, false, true, true), Charset.forName("ascii"));
                 if ((type == N_SECT || type == N_ABS) && (nlist.type() & N_STAB) == 0) {
-                    if (exportSymbols.isEmpty() || exportSymbols.contains(symbolName)) {
+                    ExportSymbol exportSymbol = null;
+                    if (exportSymbols.isEmpty() || (exportSymbol = exportSymbols.get(symbolName)) != null) {
                         if (log.isDebugEnabled()) {
                             log.debug("nlist un=0x" + Long.toHexString(nlist.un()) + ", symbolName=" + symbolName + ", type=0x" + Long.toHexString(nlist.type()) + ", isWeakDef=" + isWeakDef + ", isThumb=" + isThumb + ", value=0x" + Long.toHexString(nlist.value()));
                         }
 
-                        symbolMap.put(symbolName, new MachOSymbol(this, nlist, symbolName));
+                        MachOSymbol symbol = new MachOSymbol(this, nlist, symbolName);
+                        if (exportSymbol != null && symbol.getAddress() == exportSymbol.other) {
+                            if (log.isDebugEnabled()) {
+                                log.debug("nlist un=0x" + Long.toHexString(nlist.un()) + ", symbolName=" + symbolName + ", value=0x" + Long.toHexString(nlist.value()) + ", address=0x" + Long.toHexString(exportSymbol.getValue()) + ", other=0x" + Long.toHexString(exportSymbol.other));
+                            }
+                            symbolMap.put(symbolName, exportSymbol);
+                        } else {
+                            symbolMap.put(symbolName, symbol);
+                        }
                     } else {
                         if (log.isDebugEnabled()) {
                             log.debug("nlist FILTER un=0x" + Long.toHexString(nlist.un()) + ", symbolName=" + symbolName + ", type=0x" + Long.toHexString(nlist.type()) + ", isWeakDef=" + isWeakDef + ", isThumb=" + isThumb + ", value=0x" + Long.toHexString(nlist.value()));
@@ -97,8 +112,59 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
                 }
             }
         }
+    }
 
-        initFunctionList = parseInitFunction(machO, buffer.duplicate(), base, name, emulator);
+    @Override
+    public int callEntry(Emulator emulator, Object... args) {
+        if (entryPoint <= 0) {
+            throw new IllegalStateException("Invalid entry point");
+        }
+
+        Memory memory = emulator.getMemory();
+        final UnicornPointer stack = memory.allocateStack(0);
+
+        int argc = 0;
+        List<Pointer> argv = new ArrayList<>();
+
+        argv.add(memory.writeStackString(emulator.getProcessName()));
+        argc++;
+
+        for (int i = 0; args != null && i < args.length; i++) {
+            String arg = String.valueOf(args[i]);
+            argv.add(memory.writeStackString(arg));
+            argc++;
+        }
+
+        Pointer auxvPointer = memory.allocateStack(4);
+        assert auxvPointer != null;
+        auxvPointer.setPointer(0, null);
+
+        Pointer envPointer = memory.allocateStack(4);
+        assert envPointer != null;
+        envPointer.setPointer(0, null);
+
+        Pointer pointer = memory.allocateStack(4);
+        assert pointer != null;
+        pointer.setPointer(0, null); // NULL-terminated argv
+
+        Collections.reverse(argv);
+        for (Pointer arg : argv) {
+            pointer = memory.allocateStack(4);
+            assert pointer != null;
+            pointer.setPointer(0, arg);
+        }
+
+        UnicornPointer kernelArgumentBlock = memory.allocateStack(4);
+        assert kernelArgumentBlock != null;
+        kernelArgumentBlock.setInt(0, argc);
+
+        if (log.isDebugEnabled()) {
+            UnicornPointer sp = memory.allocateStack(0);
+            byte[] data = sp.getByteArray(0, (int) (stack.peer - sp.peer));
+            Inspector.inspect(data, "kernelArgumentBlock=" + kernelArgumentBlock + ", envPointer=" + envPointer + ", auxvPointer=" + auxvPointer);
+        }
+
+        return emulator.eEntry(base + entryPoint, kernelArgumentBlock.peer).intValue();
     }
 
     void callInitFunction(Emulator emulator) {
@@ -108,7 +174,7 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
         }
     }
 
-    private void processExportNode(Log log, ByteBuffer buffer, byte[] cummulativeString, int curStrOffset, Set<String> set) {
+    private void processExportNode(Log log, ByteBuffer buffer, byte[] cummulativeString, int curStrOffset, Map<String, ExportSymbol> map) {
         int terminalSize = Utils.readULEB128(buffer).intValue();
 
         if (terminalSize != 0) {
@@ -136,7 +202,7 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
                 importName = null;
             }
             String symbolName = new String(cummulativeString, 0, curStrOffset);
-            set.add(symbolName);
+            map.put(symbolName, new ExportSymbol(symbolName, address, this, base + other));
             if (log.isDebugEnabled()) {
                 log.debug("exportNode symbolName=" + symbolName + ", address=0x" + Long.toHexString(address) + ", other=0x" + Long.toHexString(other) + ", importName=" + importName);
             }
@@ -158,26 +224,26 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
 
             ByteBuffer duplicate = buffer.duplicate();
             duplicate.position(childNodeOffset);
-            processExportNode(log, duplicate, cummulativeString, curStrOffset+edgeStrLen, set);
+            processExportNode(log, duplicate, cummulativeString, curStrOffset+edgeStrLen, map);
         }
     }
 
-    private Collection<String> processExportNode(Log log, MachO.DyldInfoCommand dyldInfoCommand, ByteBuffer buffer) {
+    private Map<String, ExportSymbol> processExportNode(Log log, MachO.DyldInfoCommand dyldInfoCommand, ByteBuffer buffer) {
         if (dyldInfoCommand == null) {
-            return Collections.emptyList();
+            return Collections.emptyMap();
         }
 
-        Set<String> set = new HashSet<>();
+        Map<String, ExportSymbol> map = new HashMap<>();
         if (dyldInfoCommand.exportSize() > 0) {
             buffer = buffer.duplicate();
             buffer.limit((int) (dyldInfoCommand.exportOff() + dyldInfoCommand.exportSize()));
             buffer.position((int) dyldInfoCommand.exportOff());
-            processExportNode(log, buffer.slice(), new byte[4000], 0, set);
+            processExportNode(log, buffer.slice(), new byte[4000], 0, map);
         }
-        return set;
+        return map;
     }
 
-    private List<InitFunction> parseInitFunction(MachO machO, ByteBuffer buffer, long load_base, String libName, Emulator emulator) {
+    private List<InitFunction> parseInitFunction(MachO machO, ByteBuffer buffer, long load_base, String libName, Emulator emulator, MachOLoader loader) {
         List<InitFunction> initFunctionList = new ArrayList<>();
         for (MachO.LoadCommand command : machO.loadCommands()) {
             switch (command.type()) {
@@ -199,7 +265,7 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
                             log.debug("parseInitFunction libName=" + libName + ", address=0x" + Long.toHexString(address) + ", offset=0x" + Long.toHexString(section.offset()) + ", elementCount=" + elementCount);
                             addresses[i] = address;
                         }
-                        initFunctionList.add(new MachOModuleInit(load_base, libName, envp, apple, vars, addresses));
+                        initFunctionList.add(new MachOModuleInit(loader, this, envp, apple, vars, addresses));
                     }
                     break;
                 case SEGMENT_64:
@@ -222,7 +288,7 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
         return emulateFunction(emulator, base + offset, args);
     }
 
-    private static Number[] emulateFunction(Emulator emulator, long address, Object... args) {
+    public static Number[] emulateFunction(Emulator emulator, long address, Object... args) {
         List<Number> list = new ArrayList<>(args.length);
         for (Object arg : args) {
             if (arg instanceof String) {
@@ -299,10 +365,43 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
     }
 
     @Override
+    public Symbol findNearestSymbolByAddress(long addr) {
+        long abs = Long.MAX_VALUE;
+        Symbol nearestSymbol = null;
+        for (Symbol symbol : symbolMap.values()) {
+            if (symbol.getAddress() <= addr) {
+                long off = addr - symbol.getAddress();
+                if (off < abs) {
+                    abs = off;
+                    nearestSymbol = symbol;
+                }
+            }
+        }
+        return nearestSymbol;
+    }
+
+    @Override
     public String toString() {
         return path;
     }
 
-    MemoryBlock pathBlock;
+    private UnicornPointer pathPointer;
+
+    UnicornPointer createPathMemory(SvcMemory svcMemory) {
+        if (this.pathPointer == null) {
+            byte[] path = this.path.getBytes();
+            this.pathPointer = svcMemory.allocate(path.length + 1);
+            this.pathPointer.write(0, path, 0, path.length);
+            this.pathPointer.setByte(path.length, (byte) 0);
+        }
+        return this.pathPointer;
+    }
+
+    boolean hasUnresolvedSymbol() {
+        return !allSymbolBond || !allLazySymbolBond;
+    }
+
+    boolean allSymbolBond;
+    boolean allLazySymbolBond;
 
 }

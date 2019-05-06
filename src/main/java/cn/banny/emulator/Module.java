@@ -49,6 +49,8 @@ public abstract class Module {
 
     public abstract Symbol findSymbolByName(String name, boolean withDependencies) throws IOException;
 
+    public abstract Symbol findNearestSymbolByAddress(long addr);
+
     protected final Symbol findDependencySymbolByName(String name) throws IOException {
         for (Module module : neededLibraries.values()) {
             Symbol symbol = module.findSymbolByName(name, true);
@@ -92,5 +94,13 @@ public abstract class Module {
     public Module getDependencyModule(String name) {
         return neededLibraries.get(name);
     }
+
+    protected long entryPoint;
+
+    public void setEntryPoint(long entryPoint) {
+        this.entryPoint = entryPoint;
+    }
+
+    public  abstract int callEntry(Emulator emulator, Object... args);
 
 }

@@ -24,19 +24,13 @@ public class LinuxModule extends Module {
     private final List<ModuleSymbol> unresolvedSymbol;
     public final List<InitFunction> initFunctionList;
 
-    public LinuxModule(long base, long size, String name, SymbolLocator dynsym,
-                       List<ModuleSymbol> unresolvedSymbol, List<InitFunction> initFunctionList, Map<String, Module> neededLibraries, List<MemRegion> regions) {
+    LinuxModule(long base, long size, String name, SymbolLocator dynsym,
+                List<ModuleSymbol> unresolvedSymbol, List<InitFunction> initFunctionList, Map<String, Module> neededLibraries, List<MemRegion> regions) {
         super(name, base, size, neededLibraries, regions);
 
         this.dynsym = dynsym;
         this.unresolvedSymbol = unresolvedSymbol;
         this.initFunctionList = initFunctionList;
-    }
-
-    private long entryPoint;
-
-    void setEntryPoint(long entryPoint) {
-        this.entryPoint = entryPoint;
     }
 
     void callInitFunction(Emulator emulator, boolean mustCallInit) throws IOException {
@@ -74,6 +68,12 @@ public class LinuxModule extends Module {
         return dynsym.getELFSymbolByName(name);
     }
 
+    @Override
+    public Symbol findNearestSymbolByAddress(long addr) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public int callEntry(Emulator emulator, Object... args) {
         if (entryPoint <= 0) {
             throw new IllegalStateException("Invalid entry point");
