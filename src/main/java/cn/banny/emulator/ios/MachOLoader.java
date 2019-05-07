@@ -4,16 +4,13 @@ import cn.banny.emulator.Alignment;
 import cn.banny.emulator.Emulator;
 import cn.banny.emulator.Module;
 import cn.banny.emulator.Symbol;
+import cn.banny.emulator.arm.ARM;
 import cn.banny.emulator.arm.ArmSvc;
+import cn.banny.emulator.file.FileIO;
 import cn.banny.emulator.hook.HookListener;
-import cn.banny.emulator.ios.struct.objc.ClassRO;
-import cn.banny.emulator.ios.struct.objc.ClassRW;
-import cn.banny.emulator.ios.struct.objc.Objc;
-import cn.banny.emulator.ios.struct.objc.ObjcClass;
 import cn.banny.emulator.memory.MemRegion;
 import cn.banny.emulator.memory.*;
 import cn.banny.emulator.pointer.UnicornPointer;
-import cn.banny.emulator.pointer.UnicornStructure;
 import cn.banny.emulator.spi.AbstractLoader;
 import cn.banny.emulator.spi.LibraryFile;
 import cn.banny.emulator.spi.Loader;
@@ -52,13 +49,14 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
     private UnicornPointer vars;
 
     private static final int __TSD_THREAD_SELF = 0;
+//    private static final int __PTK_FRAMEWORK_OBJC_KEY5 = 0x2d;
 
     private void initializeTLS() {
         final Pointer environ = allocateStack(emulator.getPointerSize() * 3);
         assert environ != null;
         final Pointer MallocCorruptionAbort = writeStackString("MallocCorruptionAbort=0");
         environ.setPointer(0, MallocCorruptionAbort);
-        final Pointer MallocStackLogging = writeStackString("MallocStackLogging=malloc");
+        final Pointer MallocStackLogging = writeStackString("MallocStackLogging=malloc"); // malloc, vm, all
         environ.setPointer(emulator.getPointerSize(), MallocStackLogging);
         environ.setPointer(emulator.getPointerSize() * 2, null);
 
@@ -74,9 +72,10 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         vars.setPointer(0xc, _NSGetEnviron);
         vars.setPointer(0x10, _NSGetProgname);
 
-        final Pointer thread = allocateStack(0x400); // reserve space for pthread_internal_t
+        final Pointer thread = allocateStack(0x1000); // reserve space for pthread_internal_t
 
-        final UnicornPointer tls = allocateStack(0x80 * 4); // tls size
+        /* 0xa4必须固定，否则初始化objc会失败 */
+        final UnicornPointer tls = (UnicornPointer) thread.share(0xa4); // tls size
         assert tls != null;
         tls.setPointer(__TSD_THREAD_SELF * emulator.getPointerSize(), thread);
 
@@ -452,8 +451,6 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         if ("libsystem_malloc.dylib".equals(dyId)) {
             malloc = module.findSymbolByName("_malloc");
             free = module.findSymbolByName("_free");
-
-            malloc_logger = module.findSymbolByName("_malloc_logger");
         }
 
         if (entryPointCommand != null) {
@@ -474,8 +471,6 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
 
         return module;
     }
-
-    private Symbol malloc_logger;
 
     private void checkSection(String dyId, String segName, String sectName) {
         switch (sectName) {
@@ -764,83 +759,6 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
                     throw new UnsupportedOperationException("setupLazyPointerHandler SEGMENT_64");
             }
         }
-    }
-
-    private void realizeAllClasses(MachOModule module) {
-        if (module.classesRealized) {
-            return;
-        }
-        module.classesRealized = true;
-
-        Log log = LogFactory.getLog("cn.banny.emulator.ios." + module.name);
-        for (MachO.LoadCommand command : module.machO.loadCommands()) {
-            switch (command.type()) {
-                case SEGMENT:
-                    MachO.SegmentCommand segmentCommand = (MachO.SegmentCommand) command.body();
-                    if ("__DATA".equals(segmentCommand.segname())) {
-                        for (MachO.SegmentCommand.Section section : segmentCommand.sections()) {
-                            if ("__objc_classlist".equals(section.sectName())) {
-                                ByteBuffer buffer = module.buffer.duplicate();
-                                buffer.limit((int) (section.offset() + section.size()));
-                                buffer.position((int) section.offset());
-                                buffer.order(ByteOrder.LITTLE_ENDIAN);
-                                long elementCount = section.size() / emulator.getPointerSize();
-                                int classRWSize = UnicornStructure.calculateSize(ClassRW.class);
-                                Pointer mmap = mmap((int) (elementCount * classRWSize), UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE);
-                                for (int i = 0; i < elementCount; i++) {
-                                    int classRef = buffer.getInt();
-                                    Pointer pointer = UnicornPointer.pointer(emulator, module.base + classRef);
-                                    ObjcClass objcClass = new ObjcClass(pointer);
-                                    objcClass.unpack();
-                                    realizeClass(log, objcClass, mmap);
-                                    mmap = mmap.share(classRWSize);
-                                }
-                            }
-                        }
-                    }
-                    break;
-                case SEGMENT_64:
-                    throw new UnsupportedOperationException("realizeAllClasses SEGMENT_64");
-            }
-        }
-    }
-
-    private void realizeClass(Log log, ObjcClass cls, Pointer memory) {
-        ClassRW rw = new ClassRW(cls.data);
-        rw.unpack();
-        if (rw.isRealized()) {
-            return;
-        }
-
-        ClassRO ro = new ClassRO(cls.data);
-        ro.unpack();
-        if (log.isDebugEnabled()) {
-            log.debug("realizeClass className=" + ro.name.getString(0) + ", cls=" + cls);
-        }
-
-        if (ro.isFuture()) {
-            rw = new ClassRW(cls.data);
-            ro = new ClassRO(rw.ro);
-            rw.changeFlags(Objc.RW_REALIZED | Objc.RW_REALIZING, Objc.RO_FUTURE);
-        } else {
-            rw = new ClassRW(memory);
-            rw.ro = cls.data;
-            rw.flags = Objc.RW_REALIZED | Objc.RW_REALIZING;
-            cls.setData(rw);
-        }
-
-        rw.version = ro.isMetaClass() ? 7 : 0; // old runtime went up to 6
-
-        // Connect this class to its superclass's subclass lists
-        // TODO addSubclass
-
-        // Attach categories
-        // TODO methodizeClass
-
-        // TODO addRealizedClass and addRealizedMetaclass
-
-        rw.pack();
-        cls.pack();
     }
 
     private void bindIndirectSymbolPointers(MachOModule module) throws IOException {
@@ -1263,30 +1181,6 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
     private void setExecuteModule(Module module) {
         if (executeModule == null) {
             executeModule = module;
-
-            if (malloc_logger != null && emulator.getPointerSize() == 4) {
-                Log log = LogFactory.getLog("cn.banny.emulator.ios.malloc");
-                if (log.isDebugEnabled()) {
-                    Pointer pointer = malloc_logger.createPointer(emulator);
-                    log.debug("set malloc_logger old=" + pointer.getPointer(0));
-                    pointer.setPointer(0, emulator.getSvcMemory().registerSvc(new ArmSvc() {
-                        @Override
-                        public int handle(Emulator emulator) {
-                            Unicorn unicorn = emulator.getUnicorn();
-                            int type = ((Number) unicorn.reg_read(ArmConst.UC_ARM_REG_R0)).intValue();
-                            Pointer arg1 = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
-                            Pointer arg2 = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R2);
-                            Pointer arg3 = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R3);
-                            Pointer sp = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_SP);
-                            Pointer result = sp.getPointer(0);
-                            int num_hot_frames_to_skip = sp.getInt(emulator.getPointerSize());
-                            System.err.println("malloc_logger type=" + type + ", arg1=" + arg1 + ", arg2=" + arg2 + ", arg3=" + arg3 + ", result=" + result + ", num_hot_frames_to_skip=" + num_hot_frames_to_skip);
-                            return 0;
-                        }
-                    }));
-                }
-                malloc_logger = null;
-            }
         }
     }
 
@@ -1294,5 +1188,59 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
 
     Module NSGetMachExecuteHeader() {
         return executeModule;
+    }
+
+    private static final int MAP_FILE = 0x0000; /* map from file (default) */
+    private static final int MAP_SHARED = 0x0001; /* [MF|SHM] share changes */
+    private static final int MAP_PRIVATE = 0x0002; /* [MF|SHM] changes are private */
+    private static final int MAP_FIXED = 0x0010; /* [MF|SHM] interpret addr exactly */
+    private static final int MAP_ANONYMOUS = 0x1000; /* allocated from memory, swap space */
+
+    @Override
+    public int mmap2(long start, int length, int prot, int flags, int fd, int offset) {
+        int aligned = (int) ARM.alignSize(length, emulator.getPageAlign());
+
+        if (((flags & MAP_ANONYMOUS) != 0) || (start == 0 && fd <= 0 && offset == 0)) {
+            long addr = allocateMapAddress(aligned);
+            log.debug("mmap2 addr=0x" + Long.toHexString(addr) + ", mmapBaseAddress=0x" + Long.toHexString(mmapBaseAddress) + ", start=" + start + ", fd=" + fd + ", offset=" + offset + ", aligned=" + aligned);
+            unicorn.mem_map(addr, aligned, prot);
+            memoryMap.put(addr, new MemoryMap(addr, aligned, prot));
+            return (int) addr;
+        }
+        try {
+            FileIO file;
+            if (start == 0 && fd > 0 && (file = syscallHandler.fdMap.get(fd)) != null) {
+                long addr = allocateMapAddress(aligned);
+                log.debug("mmap2 addr=0x" + Long.toHexString(addr) + ", mmapBaseAddress=0x" + Long.toHexString(mmapBaseAddress));
+                return file.mmap2(unicorn, addr, aligned, prot, offset, length, memoryMap);
+            }
+
+            if ((flags & MAP_FIXED) != 0) {
+                if (log.isDebugEnabled()) {
+                    log.debug("mmap2 MAP_FIXED start=0x" + Long.toHexString(start) + ", length=" + length + ", prot=" + prot + ", fd=" + fd + ", offset=0x" + Long.toHexString(offset));
+                }
+
+                MemoryMap mapped = null;
+                for (MemoryMap map : memoryMap.values()) {
+                    if (start >= map.base && start < map.base + map.size) {
+                        mapped = map;
+                    }
+                }
+
+                long addr = start;
+                if (mapped != null) {
+                    addr = allocateMapAddress(aligned);
+                }
+
+                FileIO io = syscallHandler.fdMap.get(fd);
+                if (io != null) {
+                    return io.mmap2(unicorn, addr, aligned, prot, offset, length, memoryMap);
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+
+        throw new AbstractMethodError("mmap2 start=0x" + Long.toHexString(start) + ", length=" + length + ", prot=0x" + Integer.toHexString(prot) + ", flags=0x" + Integer.toHexString(flags) + ", fd=" + fd + ", offset=" + offset);
     }
 }

@@ -370,7 +370,7 @@ public class Dyld implements Dlfcn {
                                 pointer = pointer.share(-4); // NULL-terminated
                                 pointer.setInt(0, 0);
 
-                                if (handler != null) {
+                                if (handler != null && imageInfos != null) {
                                     // (*dyld_image_state_change_handler)(enum dyld_image_states state, uint32_t infoCount, const struct dyld_image_info info[])
                                     pointer = pointer.share(-4);
                                     pointer.setPointer(0, imageInfos.length == 0 ? null : imageInfos[0].getPointer());
@@ -475,6 +475,7 @@ public class Dyld implements Dlfcn {
 
     private static final int dyld_image_state_bound = 40;
     private static final int dyld_image_state_dependents_initialized = 45; // Only single notification for this
+    private static final int dyld_image_state_terminated = 60; // Only single notification for this
 
     private DyldImageInfo[] registerImageStateBatchChangeHandler(int state, Pointer handler, Emulator emulator) {
         if (log.isDebugEnabled()) {
@@ -508,6 +509,10 @@ public class Dyld implements Dlfcn {
     private DyldImageInfo[] registerImageStateSingleChangeHandler(int state, Pointer handler, Emulator emulator) {
         if (log.isDebugEnabled()) {
             log.debug("registerImageStateSingleChangeHandler state=" + state + ", handler=" + handler);
+        }
+
+        if (state == dyld_image_state_terminated) {
+            return null;
         }
 
         if (state != dyld_image_state_dependents_initialized) {
@@ -754,6 +759,29 @@ public class Dyld implements Dlfcn {
                 }
                 return _malloc_zone_valloc;
             }
+            if ("_malloc_zone_memalign".equals(symbolName)) {
+                if (_malloc_zone_memalign == 0) {
+                    _malloc_zone_memalign = svcMemory.registerSvc(new ArmHook() {
+                        @Override
+                        protected HookStatus hook(Unicorn u, Emulator emulator) {
+                            Pointer zone = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
+                            int alignment = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R1)).intValue();
+                            int size = ((Number) u.reg_read(ArmConst.UC_ARM_REG_R2)).intValue();
+                            if (size <= LARGE_THRESHOLD) {
+                                Log log = LogFactory.getLog("cn.banny.emulator.ios.malloc");
+                                if (log.isDebugEnabled()) {
+                                    log.debug("Fake _malloc_zone_memalign zone=" + zone + ", alignment=" + alignment + ", size=" + size);
+                                } else if (Dyld.log.isDebugEnabled()) {
+                                    Dyld.log.debug("Fake _malloc_zone_memalign zone=" + zone + ", alignment=" + alignment + ", size=" + size);
+                                }
+                                u.reg_write(ArmConst.UC_ARM_REG_R2, LARGE_THRESHOLD + 1);
+                            }
+                            return HookStatus.RET(u, old);
+                        }
+                    }).peer;
+                }
+                return _malloc_zone_memalign;
+            }
         } else if ("libsystem_pthread.dylib".equals(libraryName)) {
             if ("_pthread_getname_np".equals(symbolName)) {
                 if (_pthread_getname_np == 0) {
@@ -780,7 +808,7 @@ public class Dyld implements Dlfcn {
 
 //    private long _free;
     private long _realloc, _malloc, _calloc, _valloc;
-    private long _malloc_zone_malloc, _malloc_zone_calloc, _malloc_zone_realloc, _malloc_zone_valloc;
+    private long _malloc_zone_malloc, _malloc_zone_calloc, _malloc_zone_realloc, _malloc_zone_valloc, _malloc_zone_memalign;
     private long _pthread_getname_np;
 
     private int dlsym(Memory memory, long handle, String symbolName) {
