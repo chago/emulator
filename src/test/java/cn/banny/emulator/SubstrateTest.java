@@ -14,6 +14,8 @@ import cn.banny.emulator.memory.MemoryBlock;
 import cn.banny.emulator.pointer.UnicornPointer;
 import com.sun.jna.Pointer;
 import junit.framework.AssertionFailedError;
+import org.apache.log4j.Level;
+import org.apache.log4j.Logger;
 import unicorn.ArmConst;
 import unicorn.Unicorn;
 
@@ -32,16 +34,13 @@ public class SubstrateTest extends EmulatorTest {
         return new DarwinARMEmulator();
     }
 
+    private static final int _IONBF = 2; /* setvbuf should set unbuffered */
+
     public void testMS() throws Exception {
-        long start = System.currentTimeMillis();
         emulator.getMemory().setCallInitFunction();
 //        emulator.attach().addBreakPoint(null, 0x4041fd50);
 //        emulator.traceCode();
         Module module = emulator.loadLibrary(new File("src/test/resources/example_binaries/libsubstrate.dylib"));
-
-        Pointer thread = UnicornPointer.pointer(emulator, 0xbffffbb4L);
-        assertNotNull(thread);
-        Inspector.inspect(thread.getByteArray(0, 16), "load offset=" + (System.currentTimeMillis() - start) + "ms, thread=" + thread);
 
 //        Logger.getLogger("cn.banny.emulator.ios.ARM32SyscallHandler").setLevel(Level.DEBUG);
 
@@ -58,6 +57,12 @@ public class SubstrateTest extends EmulatorTest {
 
 //        emulator.attach().addBreakPoint(null, 0x40232a6c);
 
+        Symbol ___stdoutp = module.findSymbolByName("___stdoutp");
+        Symbol ___stderrp = module.findSymbolByName("___stderrp");
+        Symbol _setvbuf = module.findSymbolByName("_setvbuf");
+        _setvbuf.call(emulator, ___stdoutp.createPointer(emulator).getPointer(0), 0, _IONBF, 0);
+        _setvbuf.call(emulator, ___stderrp.createPointer(emulator).getPointer(0), 0, _IONBF, 0);
+
         Symbol malloc_num_zones = module.findSymbolByName("_malloc_num_zones");
         assertNotNull(malloc_num_zones);
         System.out.println("malloc_num_zones=" + malloc_num_zones.createPointer(emulator).getInt(0));
@@ -68,7 +73,7 @@ public class SubstrateTest extends EmulatorTest {
         Pointer zone = UnicornPointer.pointer(emulator, malloc_default_zone.call(emulator)[0].intValue());
         assertNotNull(zone);
         Pointer malloc = zone.getPointer(0xc);
-        Pointer block = UnicornPointer.pointer(emulator, MachOModule.emulateFunction(emulator, ((UnicornPointer) malloc).peer, zone, MachO.LARGE_THRESHOLD + 1)[0].intValue());
+        Pointer block = UnicornPointer.pointer(emulator, MachOModule.emulateFunction(emulator, ((UnicornPointer) malloc).peer, zone, 1)[0].intValue());
         assertNotNull(block);
         Pointer sizeFun = zone.getPointer(0x8);
         int size = MachOModule.emulateFunction(emulator, ((UnicornPointer) sizeFun).peer, zone, block)[0].intValue();
@@ -78,7 +83,6 @@ public class SubstrateTest extends EmulatorTest {
         System.err.println("malloc_default_zone=" + malloc_default_zone + ", zone=" + zone + ", malloc=" + malloc +
                 ", sizeFun=" + sizeFun + ", block=" + block + ", size=" + size + ", mSize=" + mSize);
 
-//        Logger.getLogger("cn.banny.emulator.AbstractEmulator").setLevel(Level.DEBUG);
         free.call(emulator, block);
 
         IHookZz hookZz = HookZz.getInstance(emulator);
@@ -136,7 +140,7 @@ public class SubstrateTest extends EmulatorTest {
 //        emulator.attach().addBreakPoint(null, 0x40234c1e);
         memoryBlock.free(false);
 
-        start = System.currentTimeMillis();
+        long start = System.currentTimeMillis();
 
 //        emulator.traceRead();
 //        emulator.attach().addBreakPoint(null, 0x401495dc);
@@ -152,6 +156,8 @@ public class SubstrateTest extends EmulatorTest {
             }
         });*/
 
+        Logger.getLogger("cn.banny.emulator.AbstractEmulator").setLevel(Level.DEBUG);
+//        emulator.traceCode();
         whale.WImportHookFunction("_strcmp", new ReplaceCallback() {
             @Override
             public HookStatus onCall(Emulator emulator, long originFunction) {

@@ -42,7 +42,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         unicorn.mem_map(STACK_BASE - stackSize, stackSize, UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE);
 
         setStackPoint(STACK_BASE);
-        initializeTLS();
+        initializeTSD();
         this.setErrno(0);
     }
 
@@ -51,12 +51,12 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
     private static final int __TSD_THREAD_SELF = 0;
 //    private static final int __PTK_FRAMEWORK_OBJC_KEY5 = 0x2d;
 
-    private void initializeTLS() {
+    private void initializeTSD() {
         final Pointer environ = allocateStack(emulator.getPointerSize() * 3);
         assert environ != null;
         final Pointer MallocCorruptionAbort = writeStackString("MallocCorruptionAbort=0");
         environ.setPointer(0, MallocCorruptionAbort);
-        final Pointer MallocStackLogging = writeStackString("MallocStackLogging=malloc"); // malloc, vm, all
+        final Pointer MallocStackLogging = null;//writeStackString("MallocStackLogging=malloc"); // malloc, vm, all
         environ.setPointer(emulator.getPointerSize(), MallocStackLogging);
         environ.setPointer(emulator.getPointerSize() * 2, null);
 
@@ -75,25 +75,25 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         final Pointer thread = allocateStack(0x1000); // reserve space for pthread_internal_t
 
         /* 0xa4必须固定，否则初始化objc会失败 */
-        final UnicornPointer tls = (UnicornPointer) thread.share(0xa4); // tls size
-        assert tls != null;
-        tls.setPointer(__TSD_THREAD_SELF * emulator.getPointerSize(), thread);
+        final UnicornPointer tsd = (UnicornPointer) thread.share(0xa4); // tsd size
+        assert tsd != null;
+        tsd.setPointer(__TSD_THREAD_SELF * emulator.getPointerSize(), thread);
 
         Pointer locale = allocateStack(emulator.getPointerSize());
 
         Pointer gap = allocateStack(emulator.getPointerSize());
 
         if (emulator.getPointerSize() == 4) {
-            unicorn.reg_write(ArmConst.UC_ARM_REG_C13_C0_3, tls.peer);
+            unicorn.reg_write(ArmConst.UC_ARM_REG_C13_C0_3, tsd.peer);
         } else {
-            unicorn.reg_write(Arm64Const.UC_ARM64_REG_TPIDR_EL0, tls.peer);
+            unicorn.reg_write(Arm64Const.UC_ARM64_REG_TPIDR_EL0, tsd.peer);
         }
-        log.debug("initializeTLS tls=" + tls + ", thread=" + thread + ", environ=" + environ + ", vars=" + vars + ", locale=" + locale + ", gap=" + gap);
+        log.debug("initializeTSD tsd=" + tsd + ", thread=" + thread + ", environ=" + environ + ", vars=" + vars + ", locale=" + locale + ", gap=" + gap);
     }
 
     @Override
     protected Module loadInternal(LibraryFile libraryFile, WriteHook unpackHook, boolean forceCallInit) throws IOException {
-        Module module = loadInternalPhase(libraryFile, true);
+        MachOModule module = loadInternalPhase(libraryFile, true);
 
         for (MachOModule export : modules.values()) {
             if (!export.lazyLoadNeededList.isEmpty()) {
@@ -168,6 +168,9 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
             default:
                 throw new UnsupportedOperationException("fileType=" + machO.header().filetype());
         }
+
+        final boolean isExecutable = machO.header().filetype() == MachO.FileType.EXECUTE;
+        final boolean isPositionIndependent = (machO.header().flags() & MH_PIE) != 0;
 
         long start = System.currentTimeMillis();
         long size = 0;
@@ -267,8 +270,12 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
             }
         }
 
-        final long load_base = mmapBaseAddress;
-        mmapBaseAddress = load_base + size;
+        boolean loadFixPosition = isExecutable && !isPositionIndependent;
+        final long load_base = loadFixPosition ? 0 : mmapBaseAddress;
+        long machHeader = -1;
+        if (!loadFixPosition) {
+            mmapBaseAddress = load_base + size;
+        }
 
         final List<NeedLibrary> neededList = new ArrayList<>();
         final List<MemRegion> regions = new ArrayList<>(5);
@@ -294,6 +301,9 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
                         prot = UnicornConst.UC_PROT_ALL;
                     }
 
+                    if (machHeader == -1 && "__TEXT".equals(segmentCommand.segname())) {
+                        machHeader = begin;
+                    }
                     Alignment alignment = this.mem_map(begin, segmentCommand.vmsize(), prot, dyId);
                     write_mem((int) segmentCommand.fileoff(), (int) segmentCommand.filesize(), begin, buffer);
 
@@ -315,6 +325,9 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
                         prot = UnicornConst.UC_PROT_ALL;
                     }
 
+                    if (machHeader == -1 && "__TEXT".equals(segmentCommand64.segname())) {
+                        machHeader = begin;
+                    }
                     alignment = this.mem_map(begin, segmentCommand64.vmsize(), prot, dyId);
                     write_mem((int) segmentCommand64.fileoff(), (int) segmentCommand64.filesize(), begin, buffer);
 
@@ -353,6 +366,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         }
 
         Map<String, MachOModule> exportModules = new LinkedHashMap<>();
+
         for (MachO.DylibCommand dylibCommand : exportDylibs) {
             String neededLibrary = dylibCommand.name();
             log.debug(dyId + " need export dependency " + neededLibrary);
@@ -422,10 +436,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
 
         long load_size = size;
         MachOModule module = new MachOModule(machO, dyId, load_base, load_size, new HashMap<String, Module>(neededLibraries), regions,
-                symtabCommand, dysymtabCommand, buffer, lazyLoadNeededList, upwardLibraries, exportModules, dylibPath, emulator, dyldInfoCommand, null, null, vars, this);
-        if (modules.isEmpty()) { // first module
-            vars.setPointer(0, UnicornPointer.pointer(emulator, module.base)); // _NSGetMachExecuteHeader
-        }
+                symtabCommand, dysymtabCommand, buffer, lazyLoadNeededList, upwardLibraries, exportModules, dylibPath, emulator, dyldInfoCommand, null, null, vars, this, machHeader);
         modules.put(dyId, module);
 
         for (MachOModule export : modules.values()) {
@@ -492,6 +503,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
             case "__dof_plockstat":
             case "__dof_objc_runt":
             case "__symbolstub1":
+            case "__symbol_stub4":
             case "__lazy_symbol":
                 break;
             default:
@@ -1090,7 +1102,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
             return null;
         }
 
-        Module module = loadInternalPhase(libraryFile, true);
+        MachOModule module = loadInternalPhase(libraryFile, true);
 
         for (MachOModule export : modules.values()) {
             if (!export.lazyLoadNeededList.isEmpty()) {
@@ -1178,15 +1190,17 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
 
     final List<UnicornPointer> addImageCallbacks = new ArrayList<>();
 
-    private void setExecuteModule(Module module) {
+    private void setExecuteModule(MachOModule module) {
         if (executeModule == null) {
             executeModule = module;
+
+            vars.setPointer(0, UnicornPointer.pointer(emulator, module.base)); // _NSGetMachExecuteHeader
         }
     }
 
-    private Module executeModule;
+    private MachOModule executeModule;
 
-    Module NSGetMachExecuteHeader() {
+    MachOModule NSGetMachExecuteHeader() {
         return executeModule;
     }
 
@@ -1195,6 +1209,22 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
     private static final int MAP_PRIVATE = 0x0002; /* [MF|SHM] changes are private */
     private static final int MAP_FIXED = 0x0010; /* [MF|SHM] interpret addr exactly */
     private static final int MAP_ANONYMOUS = 0x1000; /* allocated from memory, swap space */
+
+    final long allocate(long address, long size) {
+        MemoryMap mapped = null;
+        for (MemoryMap map : memoryMap.values()) {
+            if (address >= map.base && address < map.base + map.size) {
+                mapped = map;
+            }
+        }
+        if (mapped != null) {
+            address = allocateMapAddress(size);
+        }
+        int prot = UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE;
+        unicorn.mem_map(address, size,prot );
+        memoryMap.put(address, new MemoryMap(address, size, prot));
+        return address;
+    }
 
     @Override
     public int mmap2(long start, int length, int prot, int flags, int fd, int offset) {

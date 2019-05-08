@@ -2,6 +2,7 @@ package cn.banny.emulator;
 
 import cn.banny.emulator.ios.DarwinARMEmulator;
 import cn.banny.emulator.ios.DarwinResolver;
+import cn.banny.emulator.memory.MemoryBlock;
 import cn.banny.emulator.pointer.UnicornPointer;
 import com.sun.jna.Pointer;
 
@@ -19,6 +20,15 @@ public class XpcTest extends EmulatorTest {
         return new DarwinARMEmulator();
     }
 
+    public void testXpcNoPie() throws Exception {
+        emulator.getMemory().setCallInitFunction();
+        Module module = emulator.loadLibrary(new File("src/test/resources/example_binaries/xpcNP"));
+
+        long start = System.currentTimeMillis();
+        int ret = module.callEntry(emulator);
+        System.err.println("testXpcNoPie ret=0x" + Integer.toHexString(ret) + ", offset=" + (System.currentTimeMillis() - start) + "ms");
+    }
+
     public void testXpc() throws Exception {
 //        emulator.attach().addBreakPoint(null, 0x403b7dfc);
 //        emulator.traceCode();
@@ -33,7 +43,18 @@ public class XpcTest extends EmulatorTest {
         long start = System.currentTimeMillis();
 //        emulator.traceCode();
         int ret = module.callEntry(emulator);
-        System.err.println("xpc ret=0x" + Integer.toHexString(ret) + ", offset=" + (System.currentTimeMillis() - start) + "ms");
+        System.err.println("testXpc ret=0x" + Integer.toHexString(ret) + ", offset=" + (System.currentTimeMillis() - start) + "ms");
+
+        MemoryBlock[] blocks = new MemoryBlock[0x40];
+        for (int i = 0; i < blocks.length; i++) {
+            blocks[i] = emulator.getMemory().malloc(1, false);
+            System.out.println("Test block=" + blocks[i].getPointer());
+        }
+//        emulator.traceCode();
+//        emulator.attach().addBreakPoint(null, 0x40415dd2);
+        for (MemoryBlock block : blocks) {
+            block.free(false);
+        }
     }
 
     public static void main(String[] args) throws Exception {
