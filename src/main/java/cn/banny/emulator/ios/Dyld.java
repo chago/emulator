@@ -7,8 +7,7 @@ import cn.banny.emulator.arm.AbstractARMEmulator;
 import cn.banny.emulator.arm.ArmHook;
 import cn.banny.emulator.arm.ArmSvc;
 import cn.banny.emulator.arm.HookStatus;
-import cn.banny.emulator.ios.struct.DlInfo;
-import cn.banny.emulator.ios.struct.DyldImageInfo;
+import cn.banny.emulator.ios.struct.*;
 import cn.banny.emulator.memory.Memory;
 import cn.banny.emulator.memory.SvcMemory;
 import cn.banny.emulator.pointer.UnicornPointer;
@@ -113,7 +112,7 @@ public class Dyld implements Dlfcn {
                         public int handle(Emulator emulator) {
                             UnicornPointer mh = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
                             log.debug("__dyld_get_image_slide mh=" + mh);
-                            return mh == null ? 0 : (int) mh.peer;
+                            return mh == null ? 0 : computeSlide(emulator, mh.peer);
                         }
                     });
                 }
@@ -131,7 +130,7 @@ public class Dyld implements Dlfcn {
                                 return 0;
                             }
                             MachOModule module = (MachOModule) modules[image_index];
-                            return (int) module.machHeader;
+                            return computeSlide(emulator, module.machHeader);
                         }
                     });
                 }
@@ -250,13 +249,36 @@ public class Dyld implements Dlfcn {
                     __dyld_register_thread_helpers = svcMemory.registerSvc(new ArmSvc() {
                         @Override
                         public int handle(Emulator emulator) {
+                            // the table passed to dyld containing thread helpers
                             Pointer helpers = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
-                            log.info("registerThreadHelpers helpers=" + helpers);
+                            if (log.isDebugEnabled()) {
+                                log.debug("registerThreadHelpers helpers=" + helpers);
+                            }
                             return 0;
                         }
                     });
                 }
                 address.setPointer(0, __dyld_register_thread_helpers);
+                return 1;
+            case "__dyld_image_path_containing_address":
+                if (__dyld_image_path_containing_address == null) {
+                    __dyld_image_path_containing_address = svcMemory.registerSvc(new ArmSvc() {
+                        @Override
+                        public int handle(Emulator emulator) {
+                            UnicornPointer address = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
+                            MachOModule module = (MachOModule) loader.findModuleByAddress(address.peer);
+                            if (log.isDebugEnabled()) {
+                                log.debug("__dyld_image_path_containing_address address=" + address + ", module=" + module);
+                            }
+                            if (module != null) {
+                                return (int) module.createPathMemory(svcMemory).peer;
+                            } else {
+                                return 0;
+                            }
+                        }
+                    });
+                }
+                address.setPointer(0, __dyld_image_path_containing_address);
                 return 1;
             case "__dyld_register_func_for_remove_image":
                 /*
@@ -328,12 +350,13 @@ public class Dyld implements Dlfcn {
 
                                     for (Module md : loader.getLoadedModules()) {
                                         Log log = LogFactory.getLog("cn.banny.emulator.ios." + md.name);
+                                        MachOModule mm = (MachOModule) md;
 
                                         // (headerType *mh, unsigned long	vmaddr_slide)
                                         pointer = pointer.share(-4);
-                                        pointer.setInt(0, (int) md.base);
+                                        pointer.setInt(0, (int) mm.machHeader);
                                         pointer = pointer.share(-4);
-                                        pointer.setInt(0, (int) md.base);
+                                        pointer.setInt(0, computeSlide(emulator, mm.machHeader));
 
                                         if (log.isDebugEnabled()) {
                                             log.debug("[" + md.name + "]PushAddImageFunction: 0x" + Long.toHexString(md.base));
@@ -421,32 +444,37 @@ public class Dyld implements Dlfcn {
                 }
                 address.setPointer(0, __dyld_dyld_register_image_state_change_handler);
                 return 1;
-            case "__dyld_image_path_containing_address":
-                if (__dyld_image_path_containing_address == null) {
-                    __dyld_image_path_containing_address = svcMemory.registerSvc(new ArmSvc() {
-                        @Override
-                        public int handle(Emulator emulator) {
-                            UnicornPointer address = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
-                            MachOModule module = (MachOModule) loader.findModuleByAddress(address.peer);
-                            if (log.isDebugEnabled()) {
-                                log.debug("__dyld_image_path_containing_address address=" + address + ", module=" + module);
-                            }
-                            if (module != null) {
-                                return (int) module.createPathMemory(svcMemory).peer;
-                            } else {
-                                return 0;
-                            }
-                        }
-                    });
-                }
-                address.setPointer(0, __dyld_image_path_containing_address);
-                return 1;
             default:
                 log.info("_dyld_func_lookup name=" + name + ", address=" + address);
                 break;
         }
         address.setPointer(0, null);
         return 0;
+    }
+
+    private int computeSlide(Emulator emulator, long machHeader) {
+        if (emulator.getPointerSize() == 4) {
+            Pointer pointer = UnicornPointer.pointer(emulator, machHeader);
+            assert pointer != null;
+            MachHeader header = new MachHeader(pointer);
+            Pointer loadPointer = pointer.share(header.size());
+            for (int i = 0; i < header.ncmds; i++) {
+                LoadCommand loadCommand = new LoadCommand(loadPointer);
+                loadCommand.unpack();
+                if (loadCommand.type == io.kaitai.MachO.LoadCommandType.SEGMENT.id()) {
+                    SegmentCommand segmentCommand = new SegmentCommand(loadPointer);
+                    segmentCommand.unpack();
+
+                    if ("__TEXT".equals(new String(segmentCommand.segname).trim())) {
+                        return (int) (machHeader - segmentCommand.vmaddr);
+                    }
+                }
+                loadPointer = loadPointer.share(loadCommand.size);
+            }
+            return 0;
+        } else {
+            throw new UnsupportedOperationException();
+        }
     }
 
     private int dlopen(Memory memory, String path, Emulator emulator) {
@@ -490,6 +518,20 @@ public class Dyld implements Dlfcn {
                     mm.initFunctionList.clear();
                 }
 
+                for (Module m : memory.getLoadedModules()) {
+                    MachOModule mm = (MachOModule) m;
+                    for (InitFunction routine : mm.routines) {
+                        for (long addr : routine.addresses) {
+                            if (addr != 0 && addr != -1) {
+                                log.debug("[" + mm.name + "]PushRoutineFunction: 0x" + Long.toHexString(addr));
+                                pointer = pointer.share(-4); // routines
+                                pointer.setInt(0, (int) (mm.base + addr));
+                            }
+                        }
+                    }
+                    mm.routines.clear();
+                }
+
                 return (int) module.base;
             }
         } catch (IOException e) {
@@ -523,7 +565,7 @@ public class Dyld implements Dlfcn {
             MachOModule mm = (MachOModule) module;
             DyldImageInfo info = new DyldImageInfo(pointer);
             info.imageFilePath = mm.createPathMemory(emulator.getSvcMemory());
-            info.imageLoadAddress = UnicornPointer.pointer(emulator, module.base);
+            info.imageLoadAddress = UnicornPointer.pointer(emulator, mm.machHeader);
             info.imageFileModDate = 0;
             info.pack();
             list.add(info);
