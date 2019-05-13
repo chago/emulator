@@ -32,7 +32,7 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
     private final String path;
     final MachO.DyldInfoCommand dyldInfoCommand;
 
-    final List<InitFunction> routines;
+    private final List<InitFunction> routines;
     final List<InitFunction> initFunctionList;
 
     final long machHeader;
@@ -172,10 +172,10 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
     }
 
     void callRoutines(Emulator emulator) {
-        while (!routines.isEmpty()) {
+        /*while (!routines.isEmpty()) {
             InitFunction initFunction = routines.remove(0);
             initFunction.call(emulator);
-        }
+        }*/
     }
 
     void callInitFunction(Emulator emulator) {
@@ -286,16 +286,14 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
                         }
 
                         long elementCount = section.size() / emulator.getPointerSize();
-                        long[] addresses = new long[(int) elementCount];
                         buffer.order(ByteOrder.LITTLE_ENDIAN);
                         buffer.limit((int) (section.offset() + section.size()));
                         buffer.position((int) section.offset());
-                        for (int i = 0; i < addresses.length; i++) {
+                        for (int i = 0; i < elementCount; i++) {
                             long address = emulator.getPointerSize() == 4 ? buffer.getInt() : buffer.getLong();
                             log.debug("parseInitFunction libName=" + libName + ", address=0x" + Long.toHexString(address) + ", offset=0x" + Long.toHexString(section.offset()) + ", elementCount=" + elementCount);
-                            addresses[i] = address;
+                            initFunctionList.add(new MachOModuleInit(this, envp, apple, vars, true, address));
                         }
-                        initFunctionList.add(new MachOModuleInit(this, envp, apple, vars, true, addresses));
                     }
                     break;
                 case SEGMENT_64:

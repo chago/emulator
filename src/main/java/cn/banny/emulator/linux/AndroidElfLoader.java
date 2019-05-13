@@ -98,20 +98,24 @@ public class AndroidElfLoader extends AbstractLoader implements Memory, Loader {
         assert programNamePointer != null;
         programNamePointer.setPointer(0, programName);
 
-        final Pointer vector = allocateStack(0x100);
-        assert vector != null;
-        vector.setInt(0, 25); // AT_RANDOM is a pointer to 16 bytes of randomness on the stack.
-        vector.setPointer(4, __stack_chk_guard);
+        final Pointer auxv = allocateStack(0x100);
+        assert auxv != null;
+        if (emulator.getPointerSize() == 4) {
+            auxv.setInt(0, 25); // AT_RANDOM is a pointer to 16 bytes of randomness on the stack.
+        } else {
+            auxv.setLong(0, 25); // AT_RANDOM is a pointer to 16 bytes of randomness on the stack.
+        }
+        auxv.setPointer(emulator.getPointerSize(), __stack_chk_guard);
 
-        final Pointer environ = allocateStack(4);
+        final Pointer environ = allocateStack(emulator.getPointerSize());
         assert environ != null;
         environ.setInt(0, 0);
 
         final Pointer argv = allocateStack(0x100);
         assert argv != null;
-        argv.setPointer(4, programNamePointer);
-        argv.setPointer(8, environ);
-        argv.setPointer(0xc, vector);
+        argv.setPointer(emulator.getPointerSize(), programNamePointer);
+        argv.setPointer(2 * emulator.getPointerSize(), environ);
+        argv.setPointer(3 * emulator.getPointerSize(), auxv);
 
         final UnicornPointer tls = allocateStack(0x80 * 4); // tls size
         assert tls != null;
@@ -124,7 +128,7 @@ public class AndroidElfLoader extends AbstractLoader implements Memory, Loader {
         } else {
             unicorn.reg_write(Arm64Const.UC_ARM64_REG_TPIDR_EL0, tls.peer);
         }
-        log.debug("initializeTLS tls=" + tls + ", argv=" + argv + ", vector=" + vector + ", thread=" + thread + ", environ=" + environ);
+        log.debug("initializeTLS tls=" + tls + ", argv=" + argv + ", auxv=" + auxv + ", thread=" + thread + ", environ=" + environ);
     }
 
     private final Map<String, LinuxModule> modules = new LinkedHashMap<>();
@@ -471,19 +475,41 @@ public class AndroidElfLoader extends AbstractLoader implements Memory, Loader {
         }
 
         List<InitFunction> initFunctionList = new ArrayList<>();
+        if (elfFile.file_type == ElfFile.FT_EXEC) {
+            int preInitArraySize = dynamicStructure.getPreInitArraySize();
+            int count = preInitArraySize / emulator.getPointerSize();
+            if (count > 0) {
+                Pointer pointer = UnicornPointer.pointer(emulator, load_base + dynamicStructure.getPreInitArrayOffset());
+                if (pointer == null) {
+                    throw new IllegalStateException("DT_PREINIT_ARRAY is null");
+                }
+                for (int i = 0; i < count; i++) {
+                    Pointer func = pointer.getPointer(i * emulator.getPointerSize());
+                    if (func != null) {
+                        initFunctionList.add(new AbsoluteInitFunction(load_base, soName, ((UnicornPointer) func).peer));
+                    }
+                }
+            }
+        }
         if (elfFile.file_type == ElfFile.FT_DYN) { // not executable
             int init = dynamicStructure.getInit();
-            ElfInitArray preInitArray = dynamicStructure.getPreInitArray();
-            ElfInitArray initArray = dynamicStructure.getInitArray();
-
-            initFunctionList.add(new LinuxInitFunction(load_base, soName, init));
-
-            if (preInitArray != null) {
-                initFunctionList.add(new LinuxInitFunction(load_base, soName, preInitArray));
+            if (init != 0) {
+                initFunctionList.add(new LinuxInitFunction(load_base, soName, init));
             }
 
-            if (initArray != null) {
-                initFunctionList.add(new LinuxInitFunction(load_base, soName, initArray));
+            int initArraySize = dynamicStructure.getInitArraySize();
+            int count = initArraySize / emulator.getPointerSize();
+            if (count > 0) {
+                Pointer pointer = UnicornPointer.pointer(emulator, load_base + dynamicStructure.getInitArrayOffset());
+                if (pointer == null) {
+                    throw new IllegalStateException("DT_INIT_ARRAY is null");
+                }
+                for (int i = 0; i < count; i++) {
+                    Pointer func = pointer.getPointer(i * emulator.getPointerSize());
+                    if (func != null) {
+                        initFunctionList.add(new AbsoluteInitFunction(load_base, soName, ((UnicornPointer) func).peer));
+                    }
+                }
             }
         }
 
