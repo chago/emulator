@@ -139,21 +139,21 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
             argc++;
         }
 
-        Pointer auxvPointer = memory.allocateStack(4);
+        Pointer auxvPointer = memory.allocateStack(emulator.getPointerSize());
         assert auxvPointer != null;
         auxvPointer.setPointer(0, null);
 
-        Pointer envPointer = memory.allocateStack(4);
+        Pointer envPointer = memory.allocateStack(emulator.getPointerSize());
         assert envPointer != null;
         envPointer.setPointer(0, null);
 
-        Pointer pointer = memory.allocateStack(4);
+        Pointer pointer = memory.allocateStack(emulator.getPointerSize());
         assert pointer != null;
         pointer.setPointer(0, null); // NULL-terminated argv
 
         Collections.reverse(argv);
         for (Pointer arg : argv) {
-            pointer = memory.allocateStack(4);
+            pointer = memory.allocateStack(emulator.getPointerSize());
             assert pointer != null;
             pointer.setPointer(0, arg);
         }
@@ -297,7 +297,23 @@ public class MachOModule extends Module implements cn.banny.emulator.ios.MachO {
                     }
                     break;
                 case SEGMENT_64:
-                    throw new UnsupportedOperationException("parseInitFunction SEGMENT_64");
+                    MachO.SegmentCommand64 segmentCommand64 = (MachO.SegmentCommand64) command.body();
+                    for (MachO.SegmentCommand64.Section64 section : segmentCommand64.sections()) {
+                        long type = section.flags() & SECTION_TYPE;
+                        if (type != S_MOD_INIT_FUNC_POINTERS) {
+                            continue;
+                        }
+
+                        long elementCount = section.size() / emulator.getPointerSize();
+                        buffer.order(ByteOrder.LITTLE_ENDIAN);
+                        buffer.limit((int) (section.offset() + section.size()));
+                        buffer.position((int) section.offset());
+                        for (int i = 0; i < elementCount; i++) {
+                            long address = emulator.getPointerSize() == 4 ? buffer.getInt() : buffer.getLong();
+                            log.debug("parseInitFunction libName=" + libName + ", address=0x" + Long.toHexString(address) + ", offset=0x" + Long.toHexString(section.offset()) + ", elementCount=" + elementCount);
+                            initFunctionList.add(new MachOModuleInit(this, envp, apple, vars, true, address));
+                        }
+                    }
             }
         }
         return initFunctionList;

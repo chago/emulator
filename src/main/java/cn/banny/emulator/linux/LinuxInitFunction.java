@@ -20,9 +20,13 @@ class LinuxInitFunction extends InitFunction {
 
     @Override
     public void call(Emulator emulator) {
+        if (address == 0 || address == -1) {
+            return;
+        }
+
         log.debug("[" + libName + "]CallInitFunction: 0x" + Long.toHexString(address));
         long start = System.currentTimeMillis();
-        emulator.eInit(load_base + address);
+        emulator.eInit(getAddress());
         if (log.isDebugEnabled()) {
             System.err.println("[" + libName + "]CallInitFunction: 0x" + Long.toHexString(address) + ", offset=" + (System.currentTimeMillis() - start) + "ms");
         }

@@ -22,11 +22,16 @@ public class AbsoluteInitFunction extends InitFunction {
 
     @Override
     public void call(Emulator emulator) {
+        if (address == 0 || address == -1) {
+            return;
+        }
+
         Pointer pointer = UnicornPointer.pointer(emulator, address);
         log.debug("[" + libName + "]CallInitFunction: " + pointer);
         long start = System.currentTimeMillis();
+
         emulator.eInit(address);
-        if (log.isDebugEnabled()) {
+        if (AbsoluteInitFunction.log.isDebugEnabled()) {
             System.err.println("[" + libName + "]CallInitFunction: " + pointer + ", offset=" + (System.currentTimeMillis() - start) + "ms");
         }
     }

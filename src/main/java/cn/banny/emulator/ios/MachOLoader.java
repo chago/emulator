@@ -5,6 +5,7 @@ import cn.banny.emulator.Emulator;
 import cn.banny.emulator.Module;
 import cn.banny.emulator.Symbol;
 import cn.banny.emulator.arm.ARM;
+import cn.banny.emulator.arm.Arm64Svc;
 import cn.banny.emulator.arm.ArmSvc;
 import cn.banny.emulator.file.FileIO;
 import cn.banny.emulator.hook.HookListener;
@@ -116,7 +117,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         if (emulator.getPointerSize() == 4) {
             unicorn.reg_write(ArmConst.UC_ARM_REG_C13_C0_3, tsd.peer);
         } else {
-            unicorn.reg_write(Arm64Const.UC_ARM64_REG_TPIDR_EL0, tsd.peer);
+            unicorn.reg_write(Arm64Const.UC_ARM64_REG_TPIDRRO_EL0, tsd.peer);
         }
         log.debug("initializeTSD tsd=" + tsd + ", thread=" + thread + ", environ=" + environ + ", vars=" + vars + ", locale=" + locale + ", gap=" + gap + ", errno=" + errno);
     }
@@ -322,6 +323,10 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
             mmapBaseAddress = load_base + size;
         }
 
+        if (log.isDebugEnabled()) {
+            log.debug("start map dyid=" + dyId + ", base=0x" + Long.toHexString(load_base));
+        }
+
         final List<NeedLibrary> neededList = new ArrayList<>();
         final List<MemRegion> regions = new ArrayList<>(5);
         final List<MachO.DylibCommand> exportDylibs = new ArrayList<>();
@@ -332,11 +337,16 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
             switch (command.type()) {
                 case SEGMENT:
                     MachO.SegmentCommand segmentCommand = (MachO.SegmentCommand) command.body();
+                    long begin = load_base + segmentCommand.vmaddr();
+                    if ("__PAGEZERO".equals(segmentCommand.segname())) {
+                        regions.add(new MemRegion(begin, begin + segmentCommand.vmsize(), 0, libraryFile, segmentCommand.vmaddr()));
+                        break;
+                    }
+
                     for (MachO.SegmentCommand.Section section : segmentCommand.sections()) {
                         checkSection(dyId, segmentCommand.segname(), section.sectName());
                     }
 
-                    long begin = load_base + segmentCommand.vmaddr();
                     if (segmentCommand.vmsize() == 0) {
                         regions.add(new MemRegion(begin, begin, 0, libraryFile, segmentCommand.vmaddr()));
                         break;
@@ -356,11 +366,16 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
                     break;
                 case SEGMENT_64:
                     MachO.SegmentCommand64 segmentCommand64 = (MachO.SegmentCommand64) command.body();
+                    begin = load_base + segmentCommand64.vmaddr();
+                    if ("__PAGEZERO".equals(segmentCommand64.segname())) {
+                        regions.add(new MemRegion(begin, begin + segmentCommand64.vmsize(), 0, libraryFile, segmentCommand64.vmaddr()));
+                        break;
+                    }
+
                     for (MachO.SegmentCommand64.Section64 section : segmentCommand64.sections()) {
                         checkSection(dyId, segmentCommand64.segname(), section.sectName());
                     }
 
-                    begin = load_base + segmentCommand64.vmaddr();
                     if (segmentCommand64.vmsize() == 0) {
                         regions.add(new MemRegion(begin, begin, 0, libraryFile, segmentCommand64.vmaddr()));
                         break;
@@ -401,13 +416,11 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
             }
         }
         Log log = LogFactory.getLog("cn.banny.emulator.ios." + dyId);
-        if (log.isDebugEnabled() || MachOLoader.log.isDebugEnabled()) {
-            String msg = "load dyId=" + dyId + ", base=0x" + Long.toHexString(load_base) + ", dyldInfoCommand=" + dyldInfoCommand + ", loadNeeded=" + loadNeeded + ", regions=" + regions + ", isPositionIndependent=" + isPositionIndependent;
-            if (log.isDebugEnabled()) {
-                log.debug(msg);
-            } else {
-                MachOLoader.log.debug(msg);
-            }
+        if (!log.isDebugEnabled()) {
+            log = MachOLoader.log;
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("load dyId=" + dyId + ", base=0x" + Long.toHexString(load_base) + ", dyldInfoCommand=" + dyldInfoCommand + ", loadNeeded=" + loadNeeded + ", regions=" + regions + ", isPositionIndependent=" + isPositionIndependent);
         }
 
         Map<String, MachOModule> exportModules = new LinkedHashMap<>();
@@ -470,13 +483,8 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
             lazyLoadNeededList = neededList;
         }
 
-        if (log.isDebugEnabled() || MachOLoader.log.isDebugEnabled()) {
-            String msg = "load dyId=" + dyId + ", base=0x" + Long.toHexString(load_base) + ", neededLibraries=" + neededLibraries + ", upwardLibraries=" + upwardLibraries;
-            if (log.isDebugEnabled()) {
-                log.debug(msg);
-            } else {
-                MachOLoader.log.debug(msg);
-            }
+        if (log.isDebugEnabled()) {
+            log.debug("load dyId=" + dyId + ", base=0x" + Long.toHexString(load_base) + ", neededLibraries=" + neededLibraries + ", upwardLibraries=" + upwardLibraries);
         }
 
         long load_size = size;
@@ -569,6 +577,11 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
             case "__dof_CFRunLoop":
             case "__dof_Cocoa_Aut":
             case "__dof_cache":
+                break;
+            case "__stubs":
+            case "__unwind_info":
+            case "__got":
+            case "__eh_frame":
                 break;
             default:
                 boolean isObjc = sectName.startsWith("__objc_");
@@ -832,7 +845,37 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
                     }
                     break;
                 case SEGMENT_64:
-                    throw new UnsupportedOperationException("setupLazyPointerHandler SEGMENT_64");
+                    MachO.SegmentCommand64 segmentCommand64 = (MachO.SegmentCommand64) command.body();
+                    if ("__DATA".equals(segmentCommand64.segname())) {
+                        for (MachO.SegmentCommand64.Section64 section : segmentCommand64.sections()) {
+                            if ("__dyld".equals(section.sectName())) {
+                                Pointer dd = UnicornPointer.pointer(emulator, module.base + section.addr());
+                                if (dyldLazyBinder == null) {
+                                    dyldLazyBinder = emulator.getSvcMemory().registerSvc(new Arm64Svc() {
+                                        @Override
+                                        public int handle(Emulator emulator) {
+                                            return ((Dyld) emulator.getDlfcn())._stub_binding_helper();
+                                        }
+                                    });
+                                }
+                                if (dyldFuncLookup == null) {
+                                    dyldFuncLookup = emulator.getSvcMemory().registerSvc(new Arm64Svc() {
+                                        @Override
+                                        public int handle(Emulator emulator) {
+                                            String name = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X0).getString(0);
+                                            Pointer address = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X1);
+                                            return ((Dyld) emulator.getDlfcn())._dyld_func_lookup(emulator, name, address);
+                                        }
+                                    });
+                                }
+                                if (dd != null) {
+                                    dd.setPointer(0, dyldLazyBinder);
+                                    dd.setPointer(emulator.getPointerSize(), dyldFuncLookup);
+                                }
+                            }
+                        }
+                    }
+                    break;
             }
         }
     }
@@ -846,6 +889,9 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         MachO.DysymtabCommand dysymtabCommand = module.dysymtabCommand;
         List<Long> indirectTable = dysymtabCommand.indirectSymbols();
         Log log = LogFactory.getLog("cn.banny.emulator.ios." + module.name);
+        if (!log.isDebugEnabled()) {
+            log = MachOLoader.log;
+        }
 
         MachO.DyldInfoCommand dyldInfoCommand = module.dyldInfoCommand;
         if (dyldInfoCommand == null) {
@@ -1064,7 +1110,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         }
 
         if (log.isDebugEnabled()) {
-            log.debug("doBindAt 0x=" + Long.toHexString(symbol.getValue()) + ", type=" + type + ", symbolName=" + symbolName + ", symbolFlags=" + symbolFlags + ", addend=" + addend + ", address=0x" + Long.toHexString(address - module.base) + ", lazy=" + lazy + ", symbol=" + symbol);
+            log.debug("doBindAt 0x=" + Long.toHexString(symbol.getValue()) + ", type=" + type + ", symbolName=" + symbolName + ", symbolFlags=" + symbolFlags + ", addend=" + addend + ", address=0x" + Long.toHexString(address - module.base) + ", lazy=" + lazy + ", symbol=" + symbol + ", libName=" + module.name);
         }
 
         Pointer newPointer = UnicornPointer.pointer(emulator, bindAt);
@@ -1240,12 +1286,12 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
     }
 
     @Override
-    public void runThread(int threadId) {
+    public void runThread(int threadId, long timeout) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public void runLastThread() {
+    public void runLastThread(long timeout) {
         throw new UnsupportedOperationException();
     }
 
