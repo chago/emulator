@@ -1,22 +1,22 @@
 package com.xingin.xhs;
 
 import cn.banny.auxiliary.Inspector;
-import cn.banny.emulator.Emulator;
-import cn.banny.emulator.LibraryResolver;
-import cn.banny.emulator.Module;
-import cn.banny.emulator.arm.ARMEmulator;
-import cn.banny.emulator.arm.HookStatus;
-import cn.banny.emulator.file.FileIO;
-import cn.banny.emulator.file.IOResolver;
-import cn.banny.emulator.hook.ReplaceCallback;
-import cn.banny.emulator.hook.xhook.IxHook;
-import cn.banny.emulator.hook.xhook.XHookImpl;
-import cn.banny.emulator.linux.android.AndroidARMEmulator;
-import cn.banny.emulator.linux.android.AndroidResolver;
-import cn.banny.emulator.linux.android.dvm.*;
-import cn.banny.emulator.linux.file.ByteArrayFileIO;
-import cn.banny.emulator.memory.Memory;
-import cn.banny.emulator.pointer.UnicornPointer;
+import cn.banny.unidbg.Emulator;
+import cn.banny.unidbg.LibraryResolver;
+import cn.banny.unidbg.Module;
+import cn.banny.unidbg.arm.ARMEmulator;
+import cn.banny.unidbg.arm.HookStatus;
+import cn.banny.unidbg.file.FileIO;
+import cn.banny.unidbg.file.IOResolver;
+import cn.banny.unidbg.hook.ReplaceCallback;
+import cn.banny.unidbg.hook.xhook.IxHook;
+import cn.banny.unidbg.hook.xhook.XHookImpl;
+import cn.banny.unidbg.linux.android.AndroidARMEmulator;
+import cn.banny.unidbg.linux.android.AndroidResolver;
+import cn.banny.unidbg.linux.android.dvm.*;
+import cn.banny.unidbg.linux.file.ByteArrayFileIO;
+import cn.banny.unidbg.memory.Memory;
+import cn.banny.unidbg.pointer.UnicornPointer;
 import com.sun.jna.Pointer;
 import unicorn.ArmConst;
 import unicorn.Unicorn;
@@ -133,7 +133,7 @@ public class Shield extends AbstractJni implements IOResolver {
     }
 
     @Override
-    public DvmObject callObjectMethodV(VM vm, DvmObject dvmObject, String signature, String methodName, String args, VaList vaList) {
+    public DvmObject callObjectMethodV(BaseVM vm, DvmObject dvmObject, String signature, VaList vaList) {
         switch (signature) {
             case "com/xingin/shield/http/RedHttpInterceptor->deviceId()Ljava/lang/String;":
                 return new StringObject(vm,"e3480298-0835-355d-8972-bdce279963fc");
@@ -160,16 +160,16 @@ public class Shield extends AbstractJni implements IOResolver {
                 return clazz.newObject(null);
         }
 
-        return super.callObjectMethodV(vm, dvmObject, signature, methodName, args, vaList);
+        return super.callObjectMethodV(vm, dvmObject, signature, vaList);
     }
 
     @Override
-    public int callIntMethodV(BaseVM vm, DvmObject dvmObject, String signature, String methodName, String args, VaList vaList) {
+    public int callIntMethodV(BaseVM vm, DvmObject dvmObject, String signature, VaList vaList) {
         if ("okhttp3/Response->code()I".equals(signature)) {
             return 200;
         }
 
-        return super.callIntMethodV(vm, dvmObject, signature, methodName, args, vaList);
+        return super.callIntMethodV(vm, dvmObject, signature, vaList);
     }
 
     @Override
