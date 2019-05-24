@@ -171,14 +171,14 @@ public class MachOModule extends Module implements cn.banny.unidbg.ios.MachO {
             Inspector.inspect(data, "kernelArgumentBlock=" + kernelArgumentBlock + ", envPointer=" + envPointer + ", auxvPointer=" + auxvPointer);
         }
 
-        return emulator.eEntry(base + entryPoint, kernelArgumentBlock.peer).intValue();
+        return emulator.eEntry(machHeader + entryPoint, kernelArgumentBlock.peer).intValue();
     }
 
     void callRoutines(Emulator emulator) {
-        /*while (!routines.isEmpty()) {
-            InitFunction initFunction = routines.remove(0);
-            initFunction.call(emulator);
-        }*/
+        while (!routines.isEmpty()) {
+            InitFunction routine = routines.remove(0);
+            routine.call(emulator);
+        }
     }
 
     void callInitFunction(Emulator emulator) {
