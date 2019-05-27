@@ -1294,7 +1294,8 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
     @Override
     public Symbol dlsym(long handle, String symbolName) throws IOException {
         for (Module module : modules.values()) {
-            if (module.base == handle) {
+            MachOModule mm = (MachOModule) module;
+            if (mm.machHeader == handle) {
                 return module.findSymbolByName(symbolName, false);
             }
         }
@@ -1355,17 +1356,23 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         switch (state) {
             case Dyld.dyld_image_state_bound:
                 int slide = Dyld.computeSlide(emulator, module.machHeader);
-                for (UnicornPointer callback : addImageCallbacks) {
-                    if (log.isDebugEnabled()) {
-                        log.debug("notifySingle callback=" + callback);
+                if (!module.executable) {
+                    for (UnicornPointer callback : addImageCallbacks) {
+                        if (log.isDebugEnabled()) {
+                            log.debug("notifySingle callback=" + callback);
+                        }
+                        if (module.addImageCallSet.add(callback)) {
+                            MachOModule.emulateFunction(emulator, callback.peer, (int) module.machHeader, slide);
+                        }
                     }
-                    MachOModule.emulateFunction(emulator, callback.peer, module.machHeader, slide);
                 }
                 for (UnicornPointer handler : boundHandlers) {
                     if (log.isDebugEnabled()) {
                         log.debug("notifySingle state=" + state + ", handler=" + handler);
                     }
-                    MachOModule.emulateFunction(emulator, handler.peer, state, 1, pointer);
+                    if (module.boundCallSet.add(handler)) {
+                        MachOModule.emulateFunction(emulator, handler.peer, state, 1, pointer);
+                    }
                 }
                 break;
             case Dyld.dyld_image_state_dependents_initialized:
@@ -1373,7 +1380,9 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
                     if (log.isDebugEnabled()) {
                         log.debug("notifySingle state=" + state + ", handler=" + handler);
                     }
-                    MachOModule.emulateFunction(emulator, handler.peer, state, 1, pointer);
+                    if (module.initializedCallSet.add(handler)) {
+                        MachOModule.emulateFunction(emulator, handler.peer, state, 1, pointer);
+                    }
                 }
                 break;
             default:
@@ -1403,6 +1412,10 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         return address;
     }
 
+    public Module getExecutableModule() {
+        return executableModule;
+    }
+
     @Override
     public int mmap2(long start, int length, int prot, int flags, int fd, int offset) {
         int aligned = (int) ARM.alignSize(length, emulator.getPageAlign());
@@ -1429,19 +1442,17 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
 
                 MemoryMap mapped = null;
                 for (MemoryMap map : memoryMap.values()) {
-                    if (start >= map.base && start < map.base + map.size) {
+                    if (start >= map.base && start + aligned < map.base + map.size) {
                         mapped = map;
                     }
                 }
 
-                long addr = start;
                 if (mapped != null) {
-                    addr = allocateMapAddress(0, aligned);
+                    unicorn.mem_unmap(start, aligned);
                 }
-
                 FileIO io = syscallHandler.fdMap.get(fd);
                 if (io != null) {
-                    return io.mmap2(unicorn, addr, aligned, prot, offset, length, memoryMap);
+                    return io.mmap2(unicorn, start, aligned, prot, offset, length, memoryMap);
                 }
             }
         } catch (IOException e) {

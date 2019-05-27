@@ -5,10 +5,7 @@ import cn.banny.unidbg.Emulator;
 import cn.banny.unidbg.Module;
 import cn.banny.unidbg.StopEmulatorException;
 import cn.banny.unidbg.Svc;
-import cn.banny.unidbg.arm.ARM;
-import cn.banny.unidbg.arm.ARMEmulator;
-import cn.banny.unidbg.arm.Arm32RegisterContext;
-import cn.banny.unidbg.arm.Cpsr;
+import cn.banny.unidbg.arm.*;
 import cn.banny.unidbg.file.FileIO;
 import cn.banny.unidbg.ios.file.LocalDarwinUdpSocket;
 import cn.banny.unidbg.ios.struct.kernel.*;
@@ -23,6 +20,7 @@ import cn.banny.unidbg.unix.file.SocketIO;
 import cn.banny.unidbg.unix.file.TcpSocket;
 import cn.banny.unidbg.unix.file.UdpSocket;
 import com.sun.jna.Pointer;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -30,6 +28,8 @@ import unicorn.ArmConst;
 import unicorn.Unicorn;
 import unicorn.UnicornConst;
 import unicorn.UnicornException;
+
+import java.io.File;
 
 /**
  * http://androidxref.com/4.4.4_r1/xref/external/kernel-headers/original/asm-arm/unistd.h
@@ -463,7 +463,14 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
     private int unlink(Emulator emulator) {
         Pointer pathname = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
         String path = FilenameUtils.normalize(pathname.getString(0));
-        log.info("unlink path=" + path);
+
+        String fileName = FilenameUtils.getName(path);
+        String dir = FilenameUtils.getFullPath(path);
+        if ("/tmp/".equals(dir)) {
+            FileUtils.deleteQuietly(new File("target", fileName));
+        } else {
+            log.info("unlink path=" + path);
+        }
         return 0;
     }
 
@@ -789,7 +796,7 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
                         return 0;
                     case KERN_HOSTNAME:
                         log.debug(msg);
-                        String host = "unidbg";
+                        String host = "localhost";
                         if (bufferSize != null) {
                             bufferSize.setInt(0, host.length() + 1);
                         }
@@ -1286,7 +1293,7 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
                 Log log = LogFactory.getLog("cn.banny.unidbg.AbstractEmulator");
                 if (log.isDebugEnabled()) {
                     log.warn("mach_msg_trap header=" + header + ", size=" + header.size() + ", lr=" + UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_LR));
-                    emulator.attach().debug(emulator);
+                    emulator.attach().debug();
                 }
                 break;
         }
@@ -1332,9 +1339,12 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
     }
 
     private int gettimeofday(Emulator emulator) {
-        Pointer tv = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R0);
-        Pointer tz = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
-        return gettimeofday(tv, tz);
+        EditableArm32RegisterContext context = emulator.getRegisterContext();
+        long currentTimeMillis = System.currentTimeMillis();
+        long tv_sec = currentTimeMillis / 1000;
+        long tv_usec = (currentTimeMillis % 1000) * 1000;
+        context.setR1((int) tv_usec);
+        return (int) tv_sec;
     }
 
     private int mach_absolute_time(Emulator emulator) {

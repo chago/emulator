@@ -1,7 +1,14 @@
-package cn.banny.unidbg;
+package cn.banny.unidbg.ios;
 
-import cn.banny.unidbg.ios.DarwinARMEmulator;
-import cn.banny.unidbg.ios.DarwinResolver;
+import cn.banny.unidbg.Emulator;
+import cn.banny.unidbg.LibraryResolver;
+import cn.banny.unidbg.Module;
+import cn.banny.unidbg.Symbol;
+import cn.banny.unidbg.android.EmulatorTest;
+import cn.banny.unidbg.arm.Arm32RegisterContext;
+import cn.banny.unidbg.arm.HookStatus;
+import cn.banny.unidbg.hook.ReplaceCallback;
+import cn.banny.unidbg.hook.substrate.ISubstrate;
 import cn.banny.unidbg.memory.MemoryBlock;
 import cn.banny.unidbg.pointer.UnicornPointer;
 import com.sun.jna.Pointer;
@@ -27,6 +34,9 @@ public class XpcTest extends EmulatorTest {
         long start = System.currentTimeMillis();
         int ret = module.callEntry(emulator);
         System.err.println("testXpcNoPie ret=0x" + Integer.toHexString(ret) + ", offset=" + (System.currentTimeMillis() - start) + "ms");
+
+        Symbol objc_getClass = module.findSymbolByName("_objc_getClass");
+        assertNotNull(objc_getClass);
     }
 
     public void testXpc() throws Exception {
@@ -53,6 +63,30 @@ public class XpcTest extends EmulatorTest {
 //        emulator.traceCode();
 //        emulator.attach().addBreakPoint(null, 0x4041ddac);
         block.free(false);
+
+        ISubstrate substrate = Substrate.getInstance(emulator);
+        Module cydiaSubstrate = substrate.getImageByName("/Library/Frameworks/CydiaSubstrate.framework/CydiaSubstrate");
+        assertNotNull(cydiaSubstrate);
+        assertNotNull(substrate.getImageByName("xpc"));
+        assertNull(substrate.getImageByName("not_exists"));
+
+        Module libSystem = substrate.getImageByName("/usr/lib/libSystem.B.dylib");
+        assertNotNull(libSystem);
+
+        Symbol _MSFindSymbol = substrate.findSymbol(cydiaSubstrate, "_MSFindSymbol");
+        assertNotNull(_MSFindSymbol);
+        substrate.hookFunction(_MSFindSymbol, new ReplaceCallback() {
+            @Override
+            public HookStatus onCall(Emulator emulator, long originFunction) {
+                Arm32RegisterContext context = emulator.getRegisterContext();
+                long image = context.getR0Long();
+                Pointer symbol = context.getR1Pointer();
+                System.out.println("_MSFindSymbol image=0x" + Long.toHexString(image) + ", symbol=" + symbol.getString(0));
+                return HookStatus.RET(emulator.getUnicorn(), originFunction);
+            }
+        });
+
+        assertNotNull(substrate.findSymbol(null, "_malloc"));
     }
 
     public static void main(String[] args) throws Exception {

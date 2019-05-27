@@ -10,7 +10,9 @@
 
 @implementation BootstrapTest
 -(void) testObjc {
-  NSLog(@"Hello, unidbg ObjC: %@", self);
+  NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+  dateFormatter.dateFormat = [NSString stringWithFormat:@"yyyy-MM-dd HH:mm:ss"];
+  NSLog(@"[%@]Hello, unidbg ObjC: %@", [dateFormatter stringFromDate:[NSDate date]], self);
 }
 @end
 
@@ -45,6 +47,7 @@ static BOOL isSystemClass(Class clazz) {
 int main(int argc, char *argv[]) {
   setvbuf(stdout, NULL, _IONBF, 0);
   setvbuf(stderr, NULL, _IONBF, 0);
+
   BootstrapTest *test = [[BootstrapTest alloc] init];
   [test testObjc];
 
