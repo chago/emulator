@@ -2,6 +2,7 @@ package cn.banny.unidbg.arm.context;
 
 import cn.banny.unidbg.Emulator;
 import cn.banny.unidbg.pointer.UnicornPointer;
+import com.sun.jna.Pointer;
 import unicorn.Arm64Const;
 import unicorn.Unicorn;
 
@@ -56,17 +57,22 @@ public class UnicornArm64RegisterContext extends BaseRegisterContext implements 
     }
 
     @Override
-    public long getLr() {
+    public long getLR() {
         return reg(Arm64Const.UC_ARM64_REG_LR);
     }
 
     @Override
-    public UnicornPointer getLrPointer() {
-        return UnicornPointer.pointer(emulator, getLr());
+    public UnicornPointer getLRPointer() {
+        return UnicornPointer.pointer(emulator, getLR());
     }
 
     @Override
     public UnicornPointer getStackPointer() {
         return UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_SP);
+    }
+
+    @Override
+    public void setStackPointer(Pointer sp) {
+        unicorn.reg_write(Arm64Const.UC_ARM64_REG_SP, ((UnicornPointer) sp).peer);
     }
 }

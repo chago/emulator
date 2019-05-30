@@ -43,6 +43,11 @@ public interface Emulator extends Closeable, Disassembler, ValuePair {
     void traceCode();
     void traceCode(long begin, long end);
 
+    /**
+     * redirect trace out
+     */
+    void redirectTrace(File outFile);
+
     void runAsm(String...asm);
 
     Number[] eFunc(long begin, Number... arguments);
@@ -114,6 +119,6 @@ public interface Emulator extends Closeable, Disassembler, ValuePair {
      */
     void setTimeout(long timeout);
 
-    <T extends RegisterContext> T getRegisterContext();
+    <T extends RegisterContext> T getContext();
 
 }
