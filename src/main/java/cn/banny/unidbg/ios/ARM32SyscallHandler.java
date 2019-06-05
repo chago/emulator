@@ -50,6 +50,10 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
 
     @Override
     public void hook(Unicorn u, int intno, Object user) {
+        if (intno != ARMEmulator.EXCP_SWI) {
+            throw new UnsupportedOperationException("intno=" + intno);
+        }
+
         Emulator emulator = (Emulator) user;
 
         UnicornPointer pc = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_PC);
@@ -331,6 +335,9 @@ public class ARM32SyscallHandler extends UnixSyscallHandler implements SyscallHa
         String path = pathname.getString(0);
         if (log.isDebugEnabled()) {
             log.debug("readlink path=" + path + ", buf=" + buf + ", bufSize=" + bufSize);
+        }
+        if ("/var/db/timezone/localtime".equals(path)) { // 设置时区
+            path = "/var/db/timezone/zoneinfo/Asia/Shanghai";
         }
         buf.setString(0, path);
         return path.length() + 1;
