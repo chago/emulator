@@ -4,6 +4,7 @@ import cn.banny.auxiliary.Inspector;
 import cn.banny.unidbg.Emulator;
 import cn.banny.unidbg.arm.context.Arm32RegisterContext;
 import cn.banny.unidbg.arm.ArmSvc;
+import cn.banny.unidbg.arm.context.EditableArm32RegisterContext;
 import cn.banny.unidbg.memory.MemoryBlock;
 import cn.banny.unidbg.memory.SvcMemory;
 import cn.banny.unidbg.pointer.UnicornPointer;
@@ -33,7 +34,7 @@ public class DalvikVM extends BaseVM implements VM {
         super(emulator, apkFile);
 
         final SvcMemory svcMemory = emulator.getSvcMemory();
-        _JavaVM = svcMemory.allocate(emulator.getPointerSize());
+        _JavaVM = svcMemory.allocate(emulator.getPointerSize(), "_JavaVM");
 
         Pointer _FindClass = svcMemory.registerSvc(new ArmSvc() {
             @Override
@@ -502,6 +503,28 @@ public class DalvikVM extends BaseVM implements VM {
                     throw new UnicornException();
                 } else {
                     return dvmField.getIntField(dvmObject);
+                }
+            }
+        });
+
+        Pointer _GetLongField = svcMemory.registerSvc(new ArmSvc() {
+            @Override
+            public long handle(Emulator emulator) {
+                EditableArm32RegisterContext context = emulator.getContext();
+                UnicornPointer object = context.getPointerArg(1);
+                UnicornPointer jfieldID = context.getPointerArg(2);
+                if (log.isDebugEnabled()) {
+                    log.debug("GetLongField object=" + object + ", jfieldID=" + jfieldID);
+                }
+                DvmObject dvmObject = getObject(object.peer);
+                DvmClass dvmClass = dvmObject == null ? null : dvmObject.objectType;
+                DvmField dvmField = dvmClass == null ? null : dvmClass.fieldMap.get(jfieldID.peer);
+                if (dvmField == null) {
+                    throw new UnicornException();
+                } else {
+                    long value = dvmField.getLongField(dvmObject);
+                    context.setR1((int) (value >> 32));
+                    return value;
                 }
             }
         });
@@ -1146,7 +1169,7 @@ public class DalvikVM extends BaseVM implements VM {
             }
         });
 
-        final UnicornPointer impl = svcMemory.allocate(0x3a4 + emulator.getPointerSize());
+        final UnicornPointer impl = svcMemory.allocate(0x3a4 + emulator.getPointerSize(), "JNIEnv.impl");
         for (int i = 0; i < 0x3a4; i += 4) {
             impl.setInt(i, i);
         }
@@ -1179,6 +1202,7 @@ public class DalvikVM extends BaseVM implements VM {
         impl.setPointer(0x17c, _GetObjectField);
         impl.setPointer(0x180, _GetBooleanField);
         impl.setPointer(0x190, _GetIntField);
+        impl.setPointer(0x194, _GetLongField);
         impl.setPointer(0x1a0, _SetObjectField);
         impl.setPointer(0x1a4, _SetBooleanField);
         impl.setPointer(0x1b4, _SetIntField);
@@ -1216,7 +1240,7 @@ public class DalvikVM extends BaseVM implements VM {
         impl.setPointer(0x390, _ExceptionCheck);
         impl.setPointer(0x3a0, _GetObjectRefType);
 
-        _JNIEnv = svcMemory.allocate(emulator.getPointerSize());
+        _JNIEnv = svcMemory.allocate(emulator.getPointerSize(), "_JNIEnv");
         _JNIEnv.setPointer(0, impl);
 
         UnicornPointer _AttachCurrentThread = svcMemory.registerSvc(new ArmSvc() {
@@ -1247,7 +1271,7 @@ public class DalvikVM extends BaseVM implements VM {
             }
         });
 
-        UnicornPointer _JNIInvokeInterface = svcMemory.allocate(emulator.getPointerSize() * 8);
+        UnicornPointer _JNIInvokeInterface = svcMemory.allocate(emulator.getPointerSize() * 8, "_JNIInvokeInterface");
         for (int i = 0; i < emulator.getPointerSize() * 8; i += emulator.getPointerSize()) {
             _JNIInvokeInterface.setInt(i, i);
         }
