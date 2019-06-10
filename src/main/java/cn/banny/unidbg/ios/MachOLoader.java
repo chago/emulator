@@ -42,10 +42,15 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         super(emulator, syscallHandler);
 
         // init stack
-        final long stackSize = STACK_SIZE_OF_PAGE * emulator.getPageAlign();
-        unicorn.mem_map(STACK_BASE - stackSize, stackSize, UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE);
+        long stackBase = STACK_BASE;
+        if (emulator.getPointerSize() == 8) {
+            stackBase += 0xf00000000L;
+        }
 
-        setStackPoint(STACK_BASE);
+        final long stackSize = STACK_SIZE_OF_PAGE * emulator.getPageAlign();
+        unicorn.mem_map(stackBase - stackSize, stackSize, UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE);
+
+        setStackPoint(stackBase);
         initializeTSD();
         this.setErrno(0);
     }
@@ -98,12 +103,12 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         vars.setPointer(3 * emulator.getPointerSize(), _NSGetEnviron);
         vars.setPointer(4 * emulator.getPointerSize(), _NSGetProgname);
 
-        errno = allocateStack(4);
+        errno = allocateStack(emulator.getPointerSize());
 
         final UnicornPointer thread = allocateStack(0x1000); // reserve space for pthread_internal_t
 
         /* 0xa4必须固定，否则初始化objc会失败 */
-        final UnicornPointer tsd = (UnicornPointer) thread.share(0xa4); // tsd size
+        final UnicornPointer tsd = (UnicornPointer) thread.share(emulator.getPointerSize() == 8 ? 0xe0 : 0xa4); // tsd size
         assert tsd != null;
         tsd.setPointer(__TSD_THREAD_SELF * emulator.getPointerSize(), thread);
         tsd.setPointer(__TSD_ERRNO * emulator.getPointerSize(), errno);
@@ -266,7 +271,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
                         throw new IllegalStateException(String.format("malformed mach-o image: segment load command %s filesize is larger than vmsize", command.type()));
                     }
                     if(segmentCommand64.vmaddr() % emulator.getPageAlign() != 0 || (segmentCommand64.vmaddr() + segmentCommand64.vmsize()) % emulator.getPageAlign() != 0) {
-                        throw new IllegalArgumentException("vmaddr or vmsize not page aligned");
+                        throw new IllegalArgumentException("vmaddr or vmsize not page aligned vmaddr=0x" + Long.toHexString(segmentCommand64.vmaddr()) + ", size=" + Long.toHexString(segmentCommand64.vmsize()));
                     }
 
                     if (segmentCommand64.vmsize() == 0) {
@@ -321,7 +326,12 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
 
         final long load_base = isExecutable ? 0 : mmapBaseAddress;
         long machHeader = -1;
-        if (!isExecutable) {
+        if (isExecutable) {
+            long end = load_base + size;
+            if (end >= mmapBaseAddress) {
+                mmapBaseAddress = end;
+            }
+        } else {
             mmapBaseAddress = load_base + size;
         }
 
@@ -1398,11 +1408,17 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         }
     }
 
+    private static final int VM64_PAGE_SIZE = 0x4000;
+
     private MachOModule executableModule;
 
     final long allocate(long size, long mask) {
         if (log.isDebugEnabled()) {
             log.debug("allocate size=0x" + Long.toHexString(size) + ", mask=0x" + Long.toHexString(mask));
+        }
+
+        if (emulator.getPointerSize() == 8 && mask < VM64_PAGE_SIZE) {
+            mask = VM64_PAGE_SIZE - 1;
         }
 
         long address = allocateMapAddress(mask, size);
@@ -1417,20 +1433,24 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
     }
 
     @Override
-    public int mmap2(long start, int length, int prot, int flags, int fd, int offset) {
+    public long mmap2(long start, int length, int prot, int flags, int fd, int offset) {
         int aligned = (int) ARM.alignSize(length, emulator.getPageAlign());
+        long mask = 0;
+        if (emulator.getPointerSize() == 8) {
+            mask = VM64_PAGE_SIZE - 1;
+        }
 
         if (((flags & MAP_ANONYMOUS) != 0) || (start == 0 && fd <= 0 && offset == 0)) {
-            long addr = allocateMapAddress(0, aligned);
+            long addr = allocateMapAddress(mask, aligned);
             log.debug("mmap2 addr=0x" + Long.toHexString(addr) + ", mmapBaseAddress=0x" + Long.toHexString(mmapBaseAddress) + ", start=" + start + ", fd=" + fd + ", offset=" + offset + ", aligned=" + aligned);
             unicorn.mem_map(addr, aligned, prot);
             memoryMap.put(addr, new MemoryMap(addr, aligned, prot));
-            return (int) addr;
+            return addr;
         }
         try {
             FileIO file;
             if (start == 0 && fd > 0 && (file = syscallHandler.fdMap.get(fd)) != null) {
-                long addr = allocateMapAddress(0, aligned);
+                long addr = allocateMapAddress(mask, aligned);
                 log.debug("mmap2 addr=0x" + Long.toHexString(addr) + ", mmapBaseAddress=0x" + Long.toHexString(mmapBaseAddress));
                 return file.mmap2(unicorn, addr, aligned, prot, offset, length, memoryMap);
             }

@@ -4,6 +4,7 @@ import cn.banny.auxiliary.Inspector;
 import cn.banny.unidbg.Emulator;
 import cn.banny.unidbg.arm.context.Arm64RegisterContext;
 import cn.banny.unidbg.arm.Arm64Svc;
+import cn.banny.unidbg.arm.context.RegisterContext;
 import cn.banny.unidbg.memory.MemoryBlock;
 import cn.banny.unidbg.memory.SvcMemory;
 import cn.banny.unidbg.pointer.UnicornPointer;
@@ -609,6 +610,32 @@ public class DalvikVM64 extends BaseVM implements VM {
             }
         });
 
+        Pointer _SetDoubleField = svcMemory.registerSvc(new Arm64Svc() {
+            @Override
+            public long handle(Emulator emulator) {
+                RegisterContext context = emulator.getContext();
+                UnicornPointer object = context.getPointerArg(1);
+                UnicornPointer jfieldID = context.getPointerArg(2);
+                ByteBuffer buffer = ByteBuffer.allocate(8);
+                buffer.order(ByteOrder.LITTLE_ENDIAN);
+                buffer.putLong(context.getLongArg(3));
+                buffer.flip();
+                double value = buffer.getDouble();
+                if (log.isDebugEnabled()) {
+                    log.debug("SetDoubleField object=" + object + ", jfieldID=" + jfieldID + ", value=" + value);
+                }
+                DvmObject dvmObject = getObject(object.peer);
+                DvmClass dvmClass = dvmObject == null ? null : dvmObject.objectType;
+                DvmField dvmField = dvmClass == null ? null : dvmClass.fieldMap.get(jfieldID.peer);
+                if (dvmField == null) {
+                    throw new UnicornException();
+                } else {
+                    dvmField.setDoubleField(dvmObject, value);
+                }
+                return 0;
+            }
+        });
+
         Pointer _GetStaticMethodID = svcMemory.registerSvc(new Arm64Svc() {
             @Override
             public long handle(Emulator emulator) {
@@ -757,6 +784,25 @@ public class DalvikVM64 extends BaseVM implements VM {
                     long value = dvmMethod.callStaticLongMethodV(new VaList(DalvikVM64.this, va_list));
                     emulator.getUnicorn().reg_write(Arm64Const.UC_ARM64_REG_X1, (int) (value >> 32));
                     return (value & 0xffffffffL);
+                }
+            }
+        });
+
+        Pointer _CallStaticVoidMethod = svcMemory.registerSvc(new Arm64Svc() {
+            @Override
+            public long handle(Emulator emulator) {
+                UnicornPointer clazz = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X1);
+                UnicornPointer jmethodID = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X2);
+                if (log.isDebugEnabled()) {
+                    log.debug("CallStaticVoidMethod clazz=" + clazz + ", jmethodID=" + jmethodID);
+                }
+                DvmClass dvmClass = classMap.get(clazz.peer);
+                DvmMethod dvmMethod = dvmClass == null ? null : dvmClass.staticMethodMap.get(jmethodID.peer);
+                if (dvmMethod == null) {
+                    throw new UnicornException();
+                } else {
+                    dvmMethod.callStaticVoidMethod(ArmVarArg.create(emulator, DalvikVM64.this));
+                    return 0;
                 }
             }
         });
@@ -933,6 +979,17 @@ public class DalvikVM64 extends BaseVM implements VM {
             }
         });
 
+        Pointer _NewDoubleArray = svcMemory.registerSvc(new Arm64Svc() {
+            @Override
+            public long handle(Emulator emulator) {
+                int size = ((Number) emulator.getUnicorn().reg_read(Arm64Const.UC_ARM64_REG_X1)).intValue();
+                if (log.isDebugEnabled()) {
+                    log.debug("_NewDoubleArray size=" + size);
+                }
+                return addObject(new DoubleArray(new double[size]), false);
+            }
+        });
+
         Pointer _GetByteArrayElements = svcMemory.registerSvc(new Arm64Svc() {
             @Override
             public long handle(Emulator emulator) {
@@ -1097,6 +1154,23 @@ public class DalvikVM64 extends BaseVM implements VM {
             }
         });
 
+        Pointer _SetDoubleArrayRegion = svcMemory.registerSvc(new Arm64Svc() {
+            @Override
+            public long handle(Emulator emulator) {
+                Unicorn u = emulator.getUnicorn();
+                DoubleArray array = getObject(UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X1).toUIntPeer());
+                int start = ((Number) u.reg_read(Arm64Const.UC_ARM64_REG_X2)).intValue();
+                int len = ((Number) u.reg_read(Arm64Const.UC_ARM64_REG_X3)).intValue();
+                Pointer buf = UnicornPointer.register(emulator, Arm64Const.UC_ARM64_REG_X4);
+                double[] data = buf.getDoubleArray(0, len);
+                if (log.isDebugEnabled()) {
+                    log.debug("SetDoubleArrayRegion array=" + array + ", start=" + start + ", len=" + len + ", buf=" + buf);
+                }
+                array.setData(start, data);
+                return 0;
+            }
+        });
+
         Pointer _RegisterNatives = svcMemory.registerSvc(new Arm64Svc() {
             @Override
             public long handle(Emulator emulator) {
@@ -1202,6 +1276,7 @@ public class DalvikVM64 extends BaseVM implements VM {
         impl.setPointer(0x348, _SetBooleanField);
         impl.setPointer(0x368, _SetIntField);
         impl.setPointer(0x370, _SetLongField);
+        impl.setPointer(0x380, _SetDoubleField);
         impl.setPointer(0x388, _GetStaticMethodID);
         impl.setPointer(0x390, _CallStaticObjectMethod);
         impl.setPointer(0x398, _CallStaticObjectMethodV);
@@ -1210,6 +1285,7 @@ public class DalvikVM64 extends BaseVM implements VM {
         impl.setPointer(0x408, _CallStaticIntMethod);
         impl.setPointer(0x410, _CallStaticIntMethodV);
         impl.setPointer(0x428, _CallStaticLongMethodV);
+        impl.setPointer(0x468, _CallStaticVoidMethod);
         impl.setPointer(0x470, _CallStaticVoidMethodV);
         impl.setPointer(0x480, _GetStaticFieldID);
         impl.setPointer(0x488, _GetStaticObjectField);
@@ -1220,6 +1296,7 @@ public class DalvikVM64 extends BaseVM implements VM {
         impl.setPointer(0x558, _GetArrayLength);
         impl.setPointer(0x580, _NewByteArray);
         impl.setPointer(0x598, _NewIntArray);
+        impl.setPointer(0x5b0, _NewDoubleArray);
         impl.setPointer(0x5c0, _GetByteArrayElements);
         impl.setPointer(0x520, _GetStringLength);
         impl.setPointer(0x528, _GetStringChars);
@@ -1230,6 +1307,7 @@ public class DalvikVM64 extends BaseVM implements VM {
         impl.setPointer(0x640, _GetByteArrayRegion);
         impl.setPointer(0x680, _SetByteArrayRegion);
         impl.setPointer(0x698, _SetIntArrayRegion);
+        impl.setPointer(0x6B0, _SetDoubleArrayRegion);
         impl.setPointer(0x6B8, _RegisterNatives);
         impl.setPointer(0x6D8, _GetJavaVM);
         impl.setPointer(0x720, _ExceptionCheck);
@@ -1295,7 +1373,8 @@ public class DalvikVM64 extends BaseVM implements VM {
         if (soData != null) {
             log.debug("resolve arm64-v8a library: " + soName);
             return soData;
+        } else {
+            return null;
         }
-        return soData;
     }
 }
