@@ -2,8 +2,11 @@ package cn.banny.unidbg;
 
 import cn.banny.unidbg.arm.Arguments;
 import cn.banny.unidbg.arm.context.RegisterContext;
+import cn.banny.unidbg.debugger.DebugServer;
 import cn.banny.unidbg.debugger.Debugger;
+import cn.banny.unidbg.debugger.DebuggerType;
 import cn.banny.unidbg.debugger.gdb.GdbStub;
+import cn.banny.unidbg.debugger.ida.AndroidServer;
 import cn.banny.unidbg.memory.Memory;
 import cn.banny.unidbg.memory.MemoryBlock;
 import cn.banny.unidbg.memory.MemoryBlockImpl;
@@ -111,21 +114,32 @@ public abstract class AbstractEmulator implements Emulator {
 
     @Override
     public Debugger attach() {
-        return attach(false);
+        return attach(DebuggerType.SIMPLE);
     }
 
     @Override
-    public Debugger attach(boolean gdbServer) {
-        return attach(1, 0, gdbServer);
+    public Debugger attach(DebuggerType type) {
+        return attach(1, 0, type);
     }
 
     @Override
-    public Debugger attach(long begin, long end, boolean gdbServer) {
+    public Debugger attach(long begin, long end, DebuggerType type) {
         if (debugger != null) {
             return debugger;
         }
 
-        debugger = gdbServer ? new GdbStub(this) : createDebugger();
+        switch (type) {
+            case GDB_SERVER:
+                debugger = new GdbStub(this);
+                break;
+            case ANDROID_SERVER_V73:
+                debugger = new AndroidServer(this, DebugServer.IDA_PROTOCOL_VERSION_73);
+                break;
+            case SIMPLE:
+            default:
+                debugger = createDebugger();
+                break;
+        }
         if (debugger == null) {
             throw new UnsupportedOperationException();
         }
@@ -139,7 +153,7 @@ public abstract class AbstractEmulator implements Emulator {
 
     @Override
     public Debugger attach(long begin, long end) {
-        return attach(begin, end, false);
+        return attach(begin, end, DebuggerType.SIMPLE);
     }
 
     protected abstract Debugger createDebugger();
