@@ -390,6 +390,28 @@ public class DalvikVM extends BaseVM implements VM {
             }
         });
 
+        Pointer _CallLongMethodV = svcMemory.registerSvc(new ArmSvc() {
+            @Override
+            public long handle(Emulator emulator) {
+                UnicornPointer object = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1);
+                UnicornPointer jmethodID = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R2);
+                UnicornPointer va_list = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R3);
+                if (log.isDebugEnabled()) {
+                    log.debug("CallLongMethodV object=" + object + ", jmethodID=" + jmethodID + ", va_list=" + va_list);
+                }
+                DvmObject dvmObject = getObject(object.peer);
+                DvmClass dvmClass = dvmObject == null ? null : dvmObject.objectType;
+                DvmMethod dvmMethod = dvmClass == null ? null : dvmClass.methodMap.get(jmethodID.peer);
+                if (dvmMethod == null) {
+                    throw new UnicornException();
+                } else {
+                    long value = dvmMethod.callLongMethodV(dvmObject, new VaList(DalvikVM.this, va_list));
+                    emulator.getUnicorn().reg_write(ArmConst.UC_ARM_REG_R1, (int) (value >> 32));
+                    return (value & 0xffffffffL);
+                }
+            }
+        });
+
         Pointer _CallVoidMethod = svcMemory.registerSvc(new ArmSvc() {
             @Override
             public long handle(Emulator emulator) {
@@ -1077,6 +1099,24 @@ public class DalvikVM extends BaseVM implements VM {
             }
         });
 
+        Pointer _GetIntArrayElements = svcMemory.registerSvc(new ArmSvc() {
+            @Override
+            public long handle(Emulator emulator) {
+                IntArray array = getObject(UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1).peer);
+                Pointer isCopy = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R2);
+                if (log.isDebugEnabled()) {
+                    log.debug("GetIntArrayElements array=" + array + ", isCopy=" + isCopy);
+                }
+                if (isCopy != null) {
+                    isCopy.setInt(0, JNI_TRUE);
+                }
+                int[] value = array.value;
+                UnicornPointer pointer = array.allocateMemoryBlock(emulator, value.length * 4);
+                pointer.write(0, value, 0, value.length);
+                return pointer.peer;
+            }
+        });
+
         Pointer _GetStringLength = svcMemory.registerSvc(new ArmSvc() {
             @Override
             public long handle(Emulator emulator) {
@@ -1158,6 +1198,29 @@ public class DalvikVM extends BaseVM implements VM {
                         break;
                     case 0:
                         array.setValue(pointer.getByteArray(0, array.value.length));
+                    case JNI_ABORT:
+                        array.freeMemoryBlock(pointer);
+                        break;
+                }
+                return 0;
+            }
+        });
+
+        Pointer _ReleaseIntArrayElements = svcMemory.registerSvc(new ArmSvc() {
+            @Override
+            public long handle(Emulator emulator) {
+                IntArray array = getObject(UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1).peer);
+                Pointer pointer = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R2);
+                int mode = ((Number) emulator.getUnicorn().reg_read(ArmConst.UC_ARM_REG_R3)).intValue();
+                if (log.isDebugEnabled()) {
+                    log.debug("ReleaseIntArrayElements array=" + array + ", pointer=" + pointer + ", mode=" + mode);
+                }
+                switch (mode) {
+                    case JNI_COMMIT:
+                        array.setValue(pointer.getIntArray(0, array.value.length));
+                        break;
+                    case 0:
+                        array.setValue(pointer.getIntArray(0, array.value.length));
                     case JNI_ABORT:
                         array.freeMemoryBlock(pointer);
                         break;
@@ -1369,6 +1432,7 @@ public class DalvikVM extends BaseVM implements VM {
         impl.setPointer(0x98, _CallBooleanMethodV);
         impl.setPointer(0xc4, _CallIntMethod);
         impl.setPointer(0xc8, _CallIntMethodV);
+        impl.setPointer(0xd4, _CallLongMethodV);
         impl.setPointer(0xf4, _CallVoidMethod);
         impl.setPointer(0xf8, _CallVoidMethodV);
         impl.setPointer(0x178, _GetFieldID);
@@ -1404,6 +1468,7 @@ public class DalvikVM extends BaseVM implements VM {
         impl.setPointer(0x2cc, _NewIntArray);
         impl.setPointer(0x2d8, _NewDoubleArray);
         impl.setPointer(0x2e0, _GetByteArrayElements);
+        impl.setPointer(0x2ec, _GetIntArrayElements);
         impl.setPointer(0x290, _GetStringLength);
         impl.setPointer(0x294, _GetStringChars);
         impl.setPointer(0x298, _ReleaseStringChars);
@@ -1412,6 +1477,7 @@ public class DalvikVM extends BaseVM implements VM {
         impl.setPointer(0x2d4, _NewFloatArray);
         impl.setPointer(0x2f4, _GetFloatArrayElements);
         impl.setPointer(0x300, _ReleaseByteArrayElements);
+        impl.setPointer(0x30c, _ReleaseIntArrayElements);
         impl.setPointer(0x314, _ReleaseFloatArrayElements);
         impl.setPointer(0x320, _GetByteArrayRegion);
         impl.setPointer(0x340, _SetByteArrayRegion);
