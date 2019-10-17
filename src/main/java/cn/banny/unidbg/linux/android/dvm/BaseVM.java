@@ -49,13 +49,13 @@ public abstract class BaseVM implements VM {
     final Map<Long, DvmObject> localObjectMap = new HashMap<>();
 
     @Override
-    public final DvmClass resolveClass(String className) {
+    public final DvmClass resolveClass(String className, DvmClass... interfaceClasses) {
         long hash = Objects.hash(className) & 0xffffffffL;
         DvmClass dvmClass = classMap.get(hash);
         if (dvmClass != null) {
             return dvmClass;
         } else {
-            dvmClass = new DvmClass(this, className);
+            dvmClass = new DvmClass(this, className, interfaceClasses);
             classMap.put(hash, dvmClass);
             addObject(dvmClass, true);
             return dvmClass;
@@ -222,6 +222,23 @@ public abstract class BaseVM implements VM {
         }
     }
 
+    @Override
+    public byte[] openAsset(String fileName) {
+        if (apkFile == null) {
+            return null;
+        }
+
+        ApkFile apkFile = null;
+        try {
+            apkFile = new ApkFile(this.apkFile);
+            return apkFile.getFileData("assets/" + fileName);
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            IOUtils.closeQuietly(apkFile);
+        }
+    }
+
     String getVersionName() {
         if (apkFile == null) {
             return null;
@@ -272,7 +289,7 @@ public abstract class BaseVM implements VM {
     }
 
     @Override
-    public void callJNI_OnLoad(Emulator emulator, Module module) throws IOException {
+    public void callJNI_OnLoad(Emulator emulator, Module module) {
         new DalvikModule(this, module).callJNI_OnLoad(emulator);
     }
 }
