@@ -14,7 +14,7 @@ public class VmRegionRecurse64Reply extends UnicornStructure {
 
     public NDR_record NDR;
     public int retCode;
-    public int address;
+    public long address;
     public int size;
     public int nestingDepth;
     public int infoCnt = 7;

@@ -1,7 +1,6 @@
 package cn.banny.unidbg.ios;
 
 import cn.banny.unidbg.arm.AbstractARMEmulator;
-import cn.banny.unidbg.linux.android.dvm.VM;
 import cn.banny.unidbg.memory.Memory;
 import cn.banny.unidbg.memory.SvcMemory;
 import cn.banny.unidbg.pointer.UnicornPointer;
@@ -10,7 +9,6 @@ import cn.banny.unidbg.spi.LibraryFile;
 import cn.banny.unidbg.unix.UnixSyscallHandler;
 import com.sun.jna.Pointer;
 
-import java.io.File;
 import java.net.URL;
 
 public class DarwinARMEmulator extends AbstractARMEmulator {
@@ -74,11 +72,6 @@ public class DarwinARMEmulator extends AbstractARMEmulator {
     }
 
     @Override
-    public VM createDalvikVM(File apkFile) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public String getLibraryExtension() {
         return ".dylib";
     }
@@ -91,5 +84,10 @@ public class DarwinARMEmulator extends AbstractARMEmulator {
     @Override
     public LibraryFile createURLibraryFile(URL url, String libName) {
         return new URLibraryFile(url, libName, null);
+    }
+
+    @Override
+    protected boolean isPaddingArgument() {
+        return false;
     }
 }

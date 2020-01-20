@@ -54,7 +54,7 @@ public class AndroidARM64Emulator extends AbstractARM64Emulator implements ARMEm
     }
 
     @Override
-    public VM createDalvikVM(File apkFile) {
+    public VM createDalvikVMInternal(File apkFile) {
         return new DalvikVM64(this, apkFile);
     }
 
@@ -87,5 +87,10 @@ public class AndroidARM64Emulator extends AbstractARM64Emulator implements ARMEm
     @Override
     public LibraryFile createURLibraryFile(URL url, String libName) {
         return new URLibraryFile(url, libName, -1);
+    }
+
+    @Override
+    protected boolean isPaddingArgument() {
+        return true;
     }
 }

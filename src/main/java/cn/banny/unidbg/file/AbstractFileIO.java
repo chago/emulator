@@ -29,8 +29,12 @@ public abstract class AbstractFileIO implements FileIO {
         this.oflags = oflags;
     }
 
+    protected boolean isAppendMode() {
+        return (oflags & O_APPEND) != 0;
+    }
+
     @Override
-    public int fcntl(int cmd, int arg) {
+    public int fcntl(int cmd, long arg) {
         switch (cmd) {
             case F_GETFD:
                 return op;

@@ -13,13 +13,17 @@ public class VmRegionRecurse64Request extends UnicornStructure {
     }
 
     public NDR_record NDR;
-    public int address;
+    public long address;
     public int nestingDepth;
     public int infoCnt;
 
     @Override
     protected List<String> getFieldOrder() {
         return Arrays.asList("NDR", "address", "nestingDepth", "infoCnt");
+    }
+
+    public long getAddress() {
+        return address;
     }
 
 }

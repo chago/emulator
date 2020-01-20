@@ -27,8 +27,12 @@ public class DvmClass extends DvmObject<String> implements Hashable {
         return value;
     }
 
-    public DvmObject newObject(Object value) {
-        DvmObject obj = new DvmObject<>(this, value);
+    public String getName() {
+        return value.replace('/', '.');
+    }
+
+    public DvmObject<?> newObject(Object value) {
+        DvmObject<?> obj = new DvmObject<>(this, value);
         vm.addObject(obj, false);
         return obj;
     }
@@ -49,13 +53,17 @@ public class DvmClass extends DvmObject<String> implements Hashable {
     }
 
     int getStaticMethodID(String methodName, String args) {
-        String name = getClassName() + "->" + methodName + args;
-        long hash = name.hashCode() & 0xffffffffL;
+        String signature = getClassName() + "->" + methodName + args;
+        long hash = signature.hashCode() & 0xffffffffL;
         if (log.isDebugEnabled()) {
-            log.debug("getStaticMethodID name=" + name + ", hash=0x" + Long.toHexString(hash));
+            log.debug("getStaticMethodID signature=" + signature + ", hash=0x" + Long.toHexString(hash));
         }
-        staticMethodMap.put(hash, new DvmMethod(this, methodName, args));
-        return (int) hash;
+        if (vm.jni.acceptMethod(signature, true)) {
+            staticMethodMap.put(hash, new DvmMethod(this, methodName, args, true));
+            return (int) hash;
+        } else {
+            return 0;
+        }
     }
 
     private final Map<Long, DvmMethod> methodMap = new HashMap<>();
@@ -74,13 +82,17 @@ public class DvmClass extends DvmObject<String> implements Hashable {
     }
 
     int getMethodID(String methodName, String args) {
-        String name = getClassName() + "->" + methodName + args;
-        long hash = name.hashCode() & 0xffffffffL;
+        String signature = getClassName() + "->" + methodName + args;
+        long hash = signature.hashCode() & 0xffffffffL;
         if (log.isDebugEnabled()) {
-            log.debug("getMethodID name=" + name + ", hash=0x" + Long.toHexString(hash));
+            log.debug("getMethodID signature=" + signature + ", hash=0x" + Long.toHexString(hash));
         }
-        methodMap.put(hash, new DvmMethod(this, methodName, args));
-        return (int) hash;
+        if (vm.jni.acceptMethod(signature, false)) {
+            methodMap.put(hash, new DvmMethod(this, methodName, args, false));
+            return (int) hash;
+        } else {
+            return 0;
+        }
     }
 
     private final Map<Long, DvmField> fieldMap = new HashMap<>();
@@ -99,13 +111,17 @@ public class DvmClass extends DvmObject<String> implements Hashable {
     }
 
     int getFieldID(String fieldName, String fieldType) {
-        String name = getClassName() + "->" + fieldName + ":" + fieldType;
-        long hash = name.hashCode() & 0xffffffffL;
+        String signature = getClassName() + "->" + fieldName + ":" + fieldType;
+        long hash = signature.hashCode() & 0xffffffffL;
         if (log.isDebugEnabled()) {
-            log.debug("getFieldID name=" + name + ", hash=0x" + Long.toHexString(hash));
+            log.debug("getFieldID signature=" + signature + ", hash=0x" + Long.toHexString(hash));
         }
-        fieldMap.put(hash, new DvmField(this, fieldName, fieldType));
-        return (int) hash;
+        if (vm.jni.acceptField(signature, false)) {
+            fieldMap.put(hash, new DvmField(this, fieldName, fieldType));
+            return (int) hash;
+        } else {
+            return 0;
+        }
     }
 
     private final Map<Long, DvmField> staticFieldMap = new HashMap<>();
@@ -124,13 +140,17 @@ public class DvmClass extends DvmObject<String> implements Hashable {
     }
 
     int getStaticFieldID(String fieldName, String fieldType) {
-        String name = getClassName() + "->" + fieldName + ":" + fieldType;
-        long hash = name.hashCode() & 0xffffffffL;
+        String signature = getClassName() + "->" + fieldName + ":" + fieldType;
+        long hash = signature.hashCode() & 0xffffffffL;
         if (log.isDebugEnabled()) {
-            log.debug("getStaticFieldID name=" + name + ", hash=0x" + Long.toHexString(hash));
+            log.debug("getStaticFieldID signature=" + signature + ", hash=0x" + Long.toHexString(hash));
         }
-        staticFieldMap.put(hash, new DvmField(this, fieldName, fieldType));
-        return (int) hash;
+        if (vm.jni.acceptField(signature, true)) {
+            staticFieldMap.put(hash, new DvmField(this, fieldName, fieldType));
+            return (int) hash;
+        } else {
+            return 0;
+        }
     }
 
     @Override
@@ -148,7 +168,7 @@ public class DvmClass extends DvmObject<String> implements Hashable {
 
     @Override
     public String toString() {
-        return getClassName();
+        return "class " + getClassName();
     }
 
     final Map<String, UnicornPointer> nativesMap = new HashMap<>();
@@ -169,6 +189,9 @@ public class DvmClass extends DvmObject<String> implements Hashable {
         if (fnPtr == null) {
             throw new IllegalArgumentException("find method failed: " + method);
         }
+        if (vm.verbose) {
+            System.out.println(String.format("Find native function %s => %s", "Java_" + getClassName().replace('/', '_') + "_" + method, fnPtr));
+        }
         return fnPtr;
     }
 
@@ -182,7 +205,7 @@ public class DvmClass extends DvmObject<String> implements Hashable {
                 list.add(arg);
 
                 if(arg instanceof DvmObject) {
-                    vm.addLocalObject((DvmObject) arg);
+                    vm.addLocalObject((DvmObject<?>) arg);
                 }
             }
         }

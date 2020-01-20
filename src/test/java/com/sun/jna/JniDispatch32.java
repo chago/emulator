@@ -21,6 +21,7 @@ import cn.banny.unidbg.linux.android.AndroidResolver;
 import cn.banny.unidbg.linux.android.XHookImpl;
 import cn.banny.unidbg.linux.android.dvm.*;
 import cn.banny.unidbg.memory.Memory;
+import cn.banny.unidbg.memory.MemoryBlock;
 import cn.banny.unidbg.pointer.UnicornPointer;
 
 import java.io.File;
@@ -50,11 +51,17 @@ public class JniDispatch32 extends AbstractJni {
 
         vm = emulator.createDalvikVM(null);
         vm.setJni(this);
+        vm.setVerbose(true);
         DalvikModule dm = vm.loadLibrary(new File("src/test/resources/example_binaries/armeabi-v7a/libjnidispatch.so"), false);
         dm.callJNI_OnLoad(emulator);
         module = dm.getModule();
 
         Native = vm.resolveClass("com/sun/jna/Native");
+
+        Symbol __system_property_get = module.findSymbolByName("__system_property_get", true);
+        MemoryBlock block = memory.malloc(0x10);
+        Number ret = __system_property_get.call(emulator, "ro.build.version.sdk", block.getPointer())[0];
+        System.out.println("sdk=" + new String(block.getPointer().getByteArray(0, ret.intValue())) + ", libc=" + memory.findModule("libc.so"));
     }
 
     private void destroy() throws IOException {
@@ -130,7 +137,7 @@ public class JniDispatch32 extends AbstractJni {
     }
 
     @Override
-    public DvmObject callStaticObjectMethod(BaseVM vm, DvmClass dvmClass, String signature, VarArg varArg) {
+    public DvmObject<?> callStaticObjectMethod(BaseVM vm, DvmClass dvmClass, String signature, VarArg varArg) {
         if ("java/lang/System->getProperty(Ljava/lang/String;)Ljava/lang/String;".equals(signature)) {
             StringObject string = varArg.getObject(0);
             return new StringObject(vm, System.getProperty(string.getValue()));

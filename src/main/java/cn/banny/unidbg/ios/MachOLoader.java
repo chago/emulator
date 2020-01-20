@@ -123,7 +123,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
         } else {
             unicorn.reg_write(Arm64Const.UC_ARM64_REG_TPIDRRO_EL0, tsd.peer);
         }
-        log.debug("initializeTSD tsd=" + tsd + ", thread=" + thread + ", environ=" + environ + ", vars=" + vars + ", locale=" + locale + ", gap=" + gap + ", errno=" + errno);
+        log.debug("initializeTSD tsd=" + tsd + ", thread=" + thread + ", environ=" + environ + ", vars=" + vars + ", locale=" + locale + ", sp=0x" + Long.toHexString(getStackPoint()) + ", errno=" + errno);
     }
 
     @Override
@@ -1398,7 +1398,7 @@ public class MachOLoader extends AbstractLoader implements Memory, Loader, cn.ba
                             log.debug("notifySingle callback=" + callback);
                         }
                         if (module.addImageCallSet.add(callback)) {
-                            MachOModule.emulateFunction(emulator, callback.peer, (int) module.machHeader, slide);
+                            MachOModule.emulateFunction(emulator, callback.peer, (int) module.machHeader, new PointerNumber(UnicornPointer.pointer(emulator, slide)));
                         }
                     }
                 }

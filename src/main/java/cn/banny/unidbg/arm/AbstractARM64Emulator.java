@@ -94,7 +94,7 @@ public abstract class AbstractARM64Emulator extends AbstractEmulator implements 
 
     @Override
     protected Debugger createDebugger() {
-        return new SimpleARM64Debugger(this, true);
+        return new SimpleARM64Debugger(this, false);
     }
 
     @Override
@@ -141,9 +141,10 @@ public abstract class AbstractARM64Emulator extends AbstractEmulator implements 
     }
 
     @Override
-    public boolean printAssemble(PrintStream out, long address, int size) {
-        printAssemble(out, disassemble(address, size, 0), address);
-        return true;
+    public Capstone.CsInsn[] printAssemble(PrintStream out, long address, int size) {
+        Capstone.CsInsn[] insns = disassemble(address, size, 0);
+        printAssemble(out, insns, address);
+        return insns;
     }
 
     @Override
@@ -186,7 +187,7 @@ public abstract class AbstractARM64Emulator extends AbstractEmulator implements 
         long spBackup = memory.getStackPoint();
         try {
             unicorn.reg_write(Arm64Const.UC_ARM64_REG_LR, LR);
-            final Arguments args = ARM.initArgs(this, arguments);
+            final Arguments args = ARM.initArgs(this, isPaddingArgument(), arguments);
             return eFunc(begin, args, LR, true);
         } finally {
             memory.setStackPoint(spBackup);
@@ -198,7 +199,7 @@ public abstract class AbstractARM64Emulator extends AbstractEmulator implements 
         long spBackup = memory.getStackPoint();
         try {
             unicorn.reg_write(Arm64Const.UC_ARM64_REG_LR, LR);
-            final Arguments args = ARM.initArgs(this, arguments);
+            final Arguments args = ARM.initArgs(this, isPaddingArgument(), arguments);
             eFunc(begin, args, LR, false);
         } finally {
             memory.setStackPoint(spBackup);

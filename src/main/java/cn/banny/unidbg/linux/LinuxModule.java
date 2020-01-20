@@ -119,7 +119,7 @@ public class LinuxModule extends Module {
 
     @Override
     public Symbol findNearestSymbolByAddress(long addr) {
-        throw new UnsupportedOperationException();
+        return null; // TODO implement
     }
 
     @Override
@@ -141,6 +141,10 @@ public class LinuxModule extends Module {
             String arg = String.valueOf(args[i]);
             argv.add(memory.writeStackString(arg));
             argc++;
+        }
+
+        if (argc % 2 != 0) { // alignment sp
+            memory.allocateStack(emulator.getPointerSize());
         }
 
         Pointer auxvPointer = memory.allocateStack(emulator.getPointerSize());
@@ -189,13 +193,13 @@ public class LinuxModule extends Module {
                 list.add(new ByteArrayNumber((byte[]) arg));
             } else if(arg instanceof UnicornPointer) {
                 UnicornPointer pointer = (UnicornPointer) arg;
-                list.add(pointer.peer);
+                list.add(new PointerNumber(pointer));
             } else if (arg instanceof Number) {
                 list.add((Number) arg);
             } else if(arg instanceof Hashable) {
                 list.add(arg.hashCode()); // dvm object
             } else if(arg == null) {
-                list.add(0); // null
+                list.add(new PointerNumber(null)); // null
             } else {
                 throw new IllegalStateException("Unsupported arg: " + arg);
             }

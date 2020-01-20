@@ -1,10 +1,7 @@
 package cn.banny.unidbg.ios;
 
 import cn.banny.auxiliary.Inspector;
-import cn.banny.unidbg.Emulator;
-import cn.banny.unidbg.Module;
-import cn.banny.unidbg.StopEmulatorException;
-import cn.banny.unidbg.Svc;
+import cn.banny.unidbg.*;
 import cn.banny.unidbg.arm.ARM;
 import cn.banny.unidbg.arm.ARMEmulator;
 import cn.banny.unidbg.arm.Cpsr;
@@ -79,6 +76,10 @@ public class ARM64SyscallHandler extends UnixSyscallHandler implements SyscallHa
             }
 
             Cpsr.getArm64(u).setCarry(false);
+            if (handleSyscall(emulator, NR)) {
+                return;
+            }
+
             switch (NR) {
                 case -3888:
                     u.reg_write(ArmConst.UC_ARM_REG_R0, mach_absolute_time(emulator));
@@ -153,7 +154,7 @@ public class ARM64SyscallHandler extends UnixSyscallHandler implements SyscallHa
                     u.reg_write(Arm64Const.UC_ARM64_REG_X0, mprotect(u, emulator));
                     return;
                 case 92:
-                    u.reg_write(Arm64Const.UC_ARM64_REG_X0, fcntl(u, emulator));
+                    u.reg_write(Arm64Const.UC_ARM64_REG_X0, fcntl(emulator));
                     return;
                 case 97:
                     u.reg_write(Arm64Const.UC_ARM64_REG_X0, socket(u, emulator));
@@ -947,7 +948,7 @@ public class ARM64SyscallHandler extends UnixSyscallHandler implements SyscallHa
                 }
                 return MACH_MSG_SUCCESS;
             }
-            case 3822: // vm_region_recurse_64
+            case 4815: // vm_region_recurse_64
             {
                 VmRegionRecurse64Request args = new VmRegionRecurse64Request(request);
                 args.unpack();
@@ -967,7 +968,7 @@ public class ARM64SyscallHandler extends UnixSyscallHandler implements SyscallHa
 
                 MemoryMap memoryMap = null;
                 for (MemoryMap mm : emulator.getMemory().getMemoryMap()) {
-                    if (args.address >= mm.base && args.address < mm.base + mm.size) {
+                    if (args.getAddress() >= mm.base && args.getAddress() < mm.base + mm.size) {
                         memoryMap = mm;
                         break;
                     }
@@ -979,7 +980,7 @@ public class ARM64SyscallHandler extends UnixSyscallHandler implements SyscallHa
 
                 reply.NDR = args.NDR;
                 reply.retCode = 0; // success
-                reply.address = (int) memoryMap.base;
+                reply.address = memoryMap.base;
                 reply.size = (int) memoryMap.size;
                 reply.infoCnt = args.infoCnt;
                 reply.nestingDepth = args.nestingDepth;
@@ -1049,6 +1050,10 @@ public class ARM64SyscallHandler extends UnixSyscallHandler implements SyscallHa
             }
             default:
                 log.warn("mach_msg_trap header=" + header + ", size=" + header.size() + ", lr=" + UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_LR));
+                Log log = LogFactory.getLog("cn.banny.unidbg.AbstractEmulator");
+                if (log.isDebugEnabled()) {
+                    emulator.attach().debug();
+                }
                 break;
         }
 
@@ -1188,11 +1193,11 @@ public class ARM64SyscallHandler extends UnixSyscallHandler implements SyscallHa
         return sigaction(signum, act, oldact);
     }
 
-    private int fcntl(Unicorn u, Emulator emulator) {
+    private int fcntl(Emulator emulator) {
         RegisterContext context = emulator.getContext();
         int fd = context.getIntArg(0);
         int cmd = context.getIntArg(1);
-        int arg = context.getIntArg(2);
+        long arg = context.getLongArg(2);
         return fcntl(emulator, fd, cmd, arg);
     }
 

@@ -9,7 +9,8 @@ import cn.banny.unidbg.linux.LinuxThread;
 import cn.banny.unidbg.linux.file.*;
 import cn.banny.unidbg.memory.MemRegion;
 import cn.banny.unidbg.spi.SyscallHandler;
-import cn.banny.unidbg.unix.struct.TimeVal;
+import cn.banny.unidbg.unix.struct.TimeVal32;
+import cn.banny.unidbg.unix.struct.TimeVal64;
 import cn.banny.unidbg.unix.struct.TimeZone;
 import com.sun.jna.Pointer;
 import org.apache.commons.io.FilenameUtils;
@@ -44,7 +45,7 @@ public abstract class UnixSyscallHandler implements SyscallHandler {
     }
 
     @Override
-    public final void addIOResolver(IOResolver resolver) {
+    public void addIOResolver(IOResolver resolver) {
         if (!resolvers.contains(resolver)) {
             resolvers.add(0, resolver);
         }
@@ -52,7 +53,7 @@ public abstract class UnixSyscallHandler implements SyscallHandler {
 
     protected final FileIO resolve(Emulator emulator, String pathname, int oflags) {
         for (IOResolver resolver : resolvers) {
-            FileIO io = resolver.resolve(emulator.getWorkDir(), pathname, oflags);
+            FileIO io = resolver.resolve(emulator, emulator.getWorkDir(), pathname, oflags);
             if (io != null) {
                 return io;
             }
@@ -76,7 +77,7 @@ public abstract class UnixSyscallHandler implements SyscallHandler {
         return null;
     }
 
-    protected final int gettimeofday(Pointer tv, Pointer tz) {
+    protected int gettimeofday(Pointer tv, Pointer tz) {
         if (log.isDebugEnabled()) {
             log.debug("gettimeofday tv=" + tv + ", tz=" + tz);
         }
@@ -93,9 +94,51 @@ public abstract class UnixSyscallHandler implements SyscallHandler {
         long currentTimeMillis = System.currentTimeMillis();
         long tv_sec = currentTimeMillis / 1000;
         long tv_usec = (currentTimeMillis % 1000) * 1000;
-        TimeVal timeVal = new TimeVal(tv);
+        TimeVal32 timeVal = new TimeVal32(tv);
         timeVal.tv_sec = (int) tv_sec;
         timeVal.tv_usec = (int) tv_usec;
+        timeVal.pack();
+
+        if (tz != null) {
+            Calendar calendar = Calendar.getInstance();
+            int tz_minuteswest = -(calendar.get(Calendar.ZONE_OFFSET) + calendar.get(Calendar.DST_OFFSET)) / (60 * 1000);
+            TimeZone timeZone = new TimeZone(tz);
+            timeZone.tz_minuteswest = tz_minuteswest;
+            timeZone.tz_dsttime = 0;
+            timeZone.pack();
+        }
+
+        if (log.isDebugEnabled()) {
+            byte[] after = tv.getByteArray(0, 8);
+            Inspector.inspect(after, "gettimeofday tv after tv_sec=" + tv_sec + ", tv_usec=" + tv_usec + ", tv=" + tv);
+        }
+        if (tz != null && log.isDebugEnabled()) {
+            byte[] after = tz.getByteArray(0, 8);
+            Inspector.inspect(after, "gettimeofday tz after");
+        }
+        return 0;
+    }
+
+    protected int gettimeofday64(Pointer tv, Pointer tz) {
+        if (log.isDebugEnabled()) {
+            log.debug("gettimeofday tv=" + tv + ", tz=" + tz);
+        }
+
+        if (log.isDebugEnabled()) {
+            byte[] before = tv.getByteArray(0, 8);
+            Inspector.inspect(before, "gettimeofday tv=" + tv);
+        }
+        if (tz != null && log.isDebugEnabled()) {
+            byte[] before = tz.getByteArray(0, 8);
+            Inspector.inspect(before, "gettimeofday tz");
+        }
+
+        long currentTimeMillis = System.currentTimeMillis();
+        long tv_sec = currentTimeMillis / 1000;
+        long tv_usec = (currentTimeMillis % 1000) * 1000;
+        TimeVal64 timeVal = new TimeVal64(tv);
+        timeVal.tv_sec = tv_sec;
+        timeVal.tv_usec = tv_usec;
         timeVal.pack();
 
         if (tz != null) {
@@ -160,7 +203,7 @@ public abstract class UnixSyscallHandler implements SyscallHandler {
             this.fdMap.put(minFd, io);
             return minFd;
         }
-        FileIO driverIO = DriverFileIO.create(oflags, pathname);
+        FileIO driverIO = DriverFileIO.create(emulator, oflags, pathname);
         if (driverIO != null) {
             this.fdMap.put(minFd, driverIO);
             return minFd;
@@ -183,7 +226,7 @@ public abstract class UnixSyscallHandler implements SyscallHandler {
         return -1;
     }
 
-    protected int fcntl(Emulator emulator, int fd, int cmd, int arg) {
+    protected int fcntl(Emulator emulator, int fd, int cmd, long arg) {
         if (log.isDebugEnabled()) {
             log.debug("fcntl fd=" + fd + ", cmd=" + cmd + ", arg=" + arg);
         }
@@ -317,8 +360,21 @@ public abstract class UnixSyscallHandler implements SyscallHandler {
             return io.fstat(emulator, emulator.getUnicorn(), statbuf);
         }
 
+        log.info("stat64 pathname=" + pathname);
         emulator.getMemory().setErrno(UnixEmulator.EACCES);
         return -1;
+    }
+
+    protected boolean handleSyscall(Emulator emulator, int NR) {
+        return false;
+    }
+
+    /**
+     * handle unknown syscall
+     * @param NR syscall number
+     */
+    protected boolean handleUnknownSyscall(Emulator emulator, int NR) {
+        return false;
     }
 
 }

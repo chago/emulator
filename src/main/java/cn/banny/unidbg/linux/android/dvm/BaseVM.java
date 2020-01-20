@@ -30,7 +30,19 @@ public abstract class BaseVM implements VM {
 
     Jni jni;
 
-    DvmObject<?> jthrowable;
+    DvmObject<?> throwable;
+
+    boolean verbose;
+
+    @Override
+    public void setVerbose(boolean verbose) {
+        this.verbose = verbose;
+    }
+
+    @Override
+    public void throwException(DvmObject<?> throwable) {
+        this.throwable = throwable;
+    }
 
     @Override
     public final void setJni(Jni jni) {
@@ -40,29 +52,34 @@ public abstract class BaseVM implements VM {
     private final Emulator emulator;
     private final File apkFile;
 
+    final Set<String> notFoundClassSet = new HashSet<>();
+
+    @Override
+    public void addNotFoundClass(String className) {
+        notFoundClassSet.add(className);
+    }
+
     BaseVM(Emulator emulator, File apkFile) {
         this.emulator = emulator;
         this.apkFile = apkFile;
     }
 
-    final Map<Long, DvmObject> globalObjectMap = new HashMap<>();
-    final Map<Long, DvmObject> localObjectMap = new HashMap<>();
+    final Map<Long, DvmObject<?>> globalObjectMap = new HashMap<>();
+    final Map<Long, DvmObject<?>> localObjectMap = new HashMap<>();
 
     @Override
     public final DvmClass resolveClass(String className, DvmClass... interfaceClasses) {
         long hash = Objects.hash(className) & 0xffffffffL;
         DvmClass dvmClass = classMap.get(hash);
-        if (dvmClass != null) {
-            return dvmClass;
-        } else {
+        if (dvmClass == null) {
             dvmClass = new DvmClass(this, className, interfaceClasses);
             classMap.put(hash, dvmClass);
             addObject(dvmClass, true);
-            return dvmClass;
         }
+        return dvmClass;
     }
 
-    final int addObject(DvmObject object, boolean global) {
+    final int addObject(DvmObject<?> object, boolean global) {
         if (object == null) {
             return 0;
         } else {
@@ -80,7 +97,7 @@ public abstract class BaseVM implements VM {
     }
 
     @Override
-    public final int addLocalObject(DvmObject object) {
+    public final int addLocalObject(DvmObject<?> object) {
         if (object == null) {
             return VM.JNI_NULL;
         }
@@ -90,7 +107,7 @@ public abstract class BaseVM implements VM {
 
     @SuppressWarnings("unchecked")
     @Override
-    public final <T extends DvmObject> T getObject(long hash) {
+    public final <T extends DvmObject<?>> T getObject(long hash) {
         if (localObjectMap.containsKey(hash)) {
             return (T) localObjectMap.get(hash);
         } else {
@@ -215,6 +232,23 @@ public abstract class BaseVM implements VM {
             apkFile = new ApkFile(this.apkFile);
             apkMeta = apkFile.getApkMeta();
             return apkMeta.getPackageName();
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        } finally {
+            IOUtils.closeQuietly(apkFile);
+        }
+    }
+
+    @Override
+    public String getManifestXml() {
+        if (apkFile == null) {
+            return null;
+        }
+
+        ApkFile apkFile = null;
+        try {
+            apkFile = new ApkFile(this.apkFile);
+            return apkFile.getManifestXml();
         } catch (IOException e) {
             throw new IllegalStateException(e);
         } finally {

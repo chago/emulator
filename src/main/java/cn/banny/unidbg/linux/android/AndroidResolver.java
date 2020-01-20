@@ -26,6 +26,10 @@ public class AndroidResolver implements LibraryResolver, IOResolver {
         this.needed = needed == null ? null : Arrays.asList(needed);
     }
 
+    public int getSdk() {
+        return sdk;
+    }
+
     @Override
     public LibraryFile resolveLibrary(Emulator emulator, String libraryName) {
         if (needed == null) {
@@ -50,7 +54,7 @@ public class AndroidResolver implements LibraryResolver, IOResolver {
     }
 
     @Override
-    public FileIO resolve(File workDir, String path, int oflags) {
+    public FileIO resolve(Emulator emulator, File workDir, String path, int oflags) {
         if (workDir == null) {
             workDir = new File("target");
         }
@@ -146,8 +150,6 @@ public class AndroidResolver implements LibraryResolver, IOResolver {
                 IOUtils.closeQuietly(outputStream);
                 IOUtils.closeQuietly(inputStream);
             }
-        } else if ("/dev/__properties__".equals(path)) {
-            return new DirectoryFileIO(oflags, path);
         }
 
         return null;
