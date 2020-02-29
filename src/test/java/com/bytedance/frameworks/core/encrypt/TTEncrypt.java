@@ -1,27 +1,29 @@
 package com.bytedance.frameworks.core.encrypt;
 
-import cn.banny.auxiliary.Inspector;
-import cn.banny.unidbg.Emulator;
-import cn.banny.unidbg.Module;
-import cn.banny.unidbg.Symbol;
-import cn.banny.unidbg.arm.ARMEmulator;
-import cn.banny.unidbg.arm.HookStatus;
-import cn.banny.unidbg.arm.context.Arm32RegisterContext;
-import cn.banny.unidbg.arm.context.RegisterContext;
-import cn.banny.unidbg.hook.ReplaceCallback;
-import cn.banny.unidbg.hook.hookzz.HookEntryInfo;
-import cn.banny.unidbg.hook.hookzz.HookZz;
-import cn.banny.unidbg.hook.hookzz.IHookZz;
-import cn.banny.unidbg.hook.hookzz.WrapCallback;
-import cn.banny.unidbg.hook.xhook.IxHook;
-import cn.banny.unidbg.linux.android.AndroidARMEmulator;
-import cn.banny.unidbg.linux.android.AndroidResolver;
-import cn.banny.unidbg.linux.android.XHookImpl;
-import cn.banny.unidbg.linux.android.dvm.array.ByteArray;
-import cn.banny.unidbg.linux.android.dvm.DalvikModule;
-import cn.banny.unidbg.linux.android.dvm.DvmClass;
-import cn.banny.unidbg.linux.android.dvm.VM;
-import cn.banny.unidbg.memory.Memory;
+import com.github.unidbg.AndroidEmulator;
+import com.github.unidbg.Emulator;
+import com.github.unidbg.Module;
+import com.github.unidbg.Symbol;
+import com.github.unidbg.arm.HookStatus;
+import com.github.unidbg.arm.context.Arm32RegisterContext;
+import com.github.unidbg.arm.context.RegisterContext;
+import com.github.unidbg.debugger.DebuggerType;
+import com.github.unidbg.hook.HookContext;
+import com.github.unidbg.hook.ReplaceCallback;
+import com.github.unidbg.hook.hookzz.HookEntryInfo;
+import com.github.unidbg.hook.hookzz.HookZz;
+import com.github.unidbg.hook.hookzz.IHookZz;
+import com.github.unidbg.hook.hookzz.WrapCallback;
+import com.github.unidbg.hook.xhook.IxHook;
+import com.github.unidbg.linux.android.AndroidARMEmulator;
+import com.github.unidbg.linux.android.AndroidResolver;
+import com.github.unidbg.linux.android.XHookImpl;
+import com.github.unidbg.linux.android.dvm.DalvikModule;
+import com.github.unidbg.linux.android.dvm.DvmClass;
+import com.github.unidbg.linux.android.dvm.VM;
+import com.github.unidbg.linux.android.dvm.array.ByteArray;
+import com.github.unidbg.memory.Memory;
+import com.github.unidbg.utils.Inspector;
 import com.sun.jna.Pointer;
 
 import java.io.File;
@@ -29,7 +31,7 @@ import java.io.IOException;
 
 public class TTEncrypt {
 
-    private final ARMEmulator emulator;
+    private final AndroidEmulator emulator;
     private final VM vm;
     private final Module module;
 
@@ -72,20 +74,20 @@ public class TTEncrypt {
         IHookZz hookZz = HookZz.getInstance(emulator);
         hookZz.wrap(module.findSymbolByName("ss_encrypt"), new WrapCallback<RegisterContext>() {
             @Override
-            public void preCall(Emulator emulator, RegisterContext ctx, HookEntryInfo info) {
+            public void preCall(Emulator<?> emulator, RegisterContext ctx, HookEntryInfo info) {
                 Pointer pointer = ctx.getPointerArg(2);
                 int length = ctx.getIntArg(3);
                 byte[] key = pointer.getByteArray(0, length);
                 Inspector.inspect(key, "ss_encrypt key");
             }
             @Override
-            public void postCall(Emulator emulator, RegisterContext ctx, HookEntryInfo info) {
+            public void postCall(Emulator<?> emulator, RegisterContext ctx, HookEntryInfo info) {
                 System.out.println("ss_encrypt.postCall R0=" + ctx.getLongArg(0));
             }
         });
         hookZz.wrap(module.base + 0x00000F5C + 1, new WrapCallback<Arm32RegisterContext>() {
             @Override
-            public void preCall(Emulator emulator, Arm32RegisterContext ctx, HookEntryInfo info) {
+            public void preCall(Emulator<?> emulator, Arm32RegisterContext ctx, HookEntryInfo info) {
                 System.out.println("R3=" + ctx.getLongArg(3) + ", R10=0x" + Long.toHexString(ctx.getR10Long()));
             }
         });
@@ -93,25 +95,35 @@ public class TTEncrypt {
         hookZz.enable_arm_arm64_b_branch();
         hookZz.replace(module.findSymbolByName("ss_encrypted_size"), new ReplaceCallback() {
             @Override
-            public HookStatus onCall(Emulator emulator, long originFunction) {
-                System.out.println("ss_encrypted_size.onCall arg0=" + emulator.getContext().getIntArg(0) + ", originFunction=0x" + Long.toHexString(originFunction));
+            public HookStatus onCall(Emulator<?> emulator, HookContext context, long originFunction) {
+                System.out.println("ss_encrypted_size.onCall arg0=" + context.getIntArg(0) + ", originFunction=0x" + Long.toHexString(originFunction));
                 return HookStatus.RET(emulator, originFunction);
             }
-        });
+            @Override
+            public void postCall(Emulator<?> emulator, HookContext context) {
+                System.out.println("ss_encrypted_size.postCall ret=" + context.getIntArg(0));
+            }
+        }, true);
         hookZz.disable_arm_arm64_b_branch();
 
         IxHook xHook = XHookImpl.getInstance(emulator);
         xHook.register("libttEncrypt.so", "strlen", new ReplaceCallback() {
             @Override
-            public HookStatus onCall(Emulator emulator, long originFunction) {
-                Pointer pointer = emulator.getContext().getPointerArg(0);
-                System.out.println("strlen=" + pointer.getString(0));
+            public HookStatus onCall(Emulator<?> emulator, HookContext context, long originFunction) {
+                Pointer pointer = context.getPointerArg(0);
+                String str = pointer.getString(0);
+                System.out.println("strlen=" + str);
+                context.set("str", str);
                 return HookStatus.RET(emulator, originFunction);
             }
-        });
+            @Override
+            public void postCall(Emulator<?> emulator, HookContext context) {
+                System.out.println("strlen=" + context.get("str") + ", ret=" + context.getIntArg(0));
+            }
+        }, true);
         xHook.register("libttEncrypt.so", "memmove", new ReplaceCallback() {
             @Override
-            public HookStatus onCall(Emulator emulator, long originFunction) {
+            public HookStatus onCall(Emulator<?> emulator, long originFunction) {
                 RegisterContext context = emulator.getContext();
                 Pointer dest = context.getPointerArg(0);
                 Pointer src = context.getPointerArg(1);
@@ -122,7 +134,7 @@ public class TTEncrypt {
         });
         xHook.register("libttEncrypt.so", "memcpy", new ReplaceCallback() {
             @Override
-            public HookStatus onCall(Emulator emulator, long originFunction) {
+            public HookStatus onCall(Emulator<?> emulator, long originFunction) {
                 RegisterContext context = emulator.getContext();
                 Pointer dest = context.getPointerArg(0);
                 Pointer src = context.getPointerArg(1);
@@ -135,7 +147,7 @@ public class TTEncrypt {
 
         long start = System.currentTimeMillis();
         byte[] data = new byte[16];
-//        emulator.attach(DebuggerType.GDB_SERVER);
+        emulator.attach(DebuggerType.ANDROID_SERVER_V7);
         Number ret = TTEncryptUtils.callStaticJniMethod(emulator, "ttEncrypt([BI)[B", vm.addLocalObject(new ByteArray(data)), data.length);
         long hash = ret.intValue() & 0xffffffffL;
         ByteArray array = vm.getObject(hash);

@@ -1,8 +1,7 @@
-#include <stdlib.h>
-#include <stdio.h>
 #include <objc/runtime.h>
-#include <dlfcn.h>
 #import <Foundation/Foundation.h>
+#import <CoreTelephony/CTTelephonyNetworkInfo.h>
+#include "test.h"
 
 @interface BootstrapTest : NSObject {}
 -(void)testObjc;
@@ -10,11 +9,12 @@
 
 @implementation BootstrapTest
 -(void) testObjc {
-  NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
-  dateFormatter.dateFormat = @"yyyy-MM-dd HH:mm:ss";
-  NSDate *date = [NSDate date];
-  NSString *str = [date description];
-  NSLog(@"[%@]Hello, unidbg: %@, date=%@", [dateFormatter stringFromDate:date], self, str);
+  CTTelephonyNetworkInfo *info = [[CTTelephonyNetworkInfo alloc]init];
+  CTCarrier *carrier = [info subscriberCellularProvider];
+  NSLog(@"CTTelephonyNetworkInfo: carrier=%@", carrier);
+
+  NSDictionary *proxySettings = (NSDictionary *)CFNetworkCopySystemProxySettings();
+  NSLog(@"CFNetworkCopySystemProxySettings proxySettings=%@", proxySettings);
 }
 -(NSString *) description {
   return @"This is ObjC TEST";
@@ -54,6 +54,13 @@ int main(int argc, char *argv[]) {
   setvbuf(stderr, NULL, _IONBF, 0);
 
   BootstrapTest *test = [[BootstrapTest alloc] init];
+
+  NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
+  dateFormatter.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+  NSDate *date = [NSDate date];
+  NSString *str = [date description];
+  NSLog(@"[%@]Hello, unidbg: %@, date=%@, NO=%lu", [dateFormatter stringFromDate:date], test, str, (unsigned long) NO);
+
   [test testObjc];
 
   int classCount = objc_getClassList(NULL, 0);
@@ -66,6 +73,8 @@ int main(int argc, char *argv[]) {
     }
   }
   free(classes);
+
+  do_test();
 
   return 0;
 }

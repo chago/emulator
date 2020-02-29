@@ -1,28 +1,25 @@
 package com.sun.jna;
 
-import cn.banny.auxiliary.Inspector;
-import cn.banny.unidbg.Emulator;
-import cn.banny.unidbg.LibraryResolver;
-import cn.banny.unidbg.Module;
-import cn.banny.unidbg.Symbol;
-import cn.banny.unidbg.arm.ARMEmulator;
-import cn.banny.unidbg.arm.HookStatus;
-import cn.banny.unidbg.arm.context.RegisterContext;
-import cn.banny.unidbg.hook.ReplaceCallback;
-import cn.banny.unidbg.hook.hookzz.HookEntryInfo;
-import cn.banny.unidbg.hook.hookzz.HookZz;
-import cn.banny.unidbg.hook.hookzz.IHookZz;
-import cn.banny.unidbg.hook.hookzz.WrapCallback;
-import cn.banny.unidbg.hook.whale.IWhale;
-import cn.banny.unidbg.hook.whale.Whale;
-import cn.banny.unidbg.hook.xhook.IxHook;
-import cn.banny.unidbg.linux.android.AndroidARM64Emulator;
-import cn.banny.unidbg.linux.android.AndroidResolver;
-import cn.banny.unidbg.linux.android.XHookImpl;
-import cn.banny.unidbg.linux.android.dvm.*;
-import cn.banny.unidbg.memory.Memory;
-import cn.banny.unidbg.memory.MemoryBlock;
-import cn.banny.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.*;
+import com.github.unidbg.arm.HookStatus;
+import com.github.unidbg.arm.context.RegisterContext;
+import com.github.unidbg.hook.HookContext;
+import com.github.unidbg.hook.ReplaceCallback;
+import com.github.unidbg.hook.hookzz.HookEntryInfo;
+import com.github.unidbg.hook.hookzz.HookZz;
+import com.github.unidbg.hook.hookzz.IHookZz;
+import com.github.unidbg.hook.hookzz.WrapCallback;
+import com.github.unidbg.hook.whale.IWhale;
+import com.github.unidbg.hook.whale.Whale;
+import com.github.unidbg.hook.xhook.IxHook;
+import com.github.unidbg.linux.android.AndroidARM64Emulator;
+import com.github.unidbg.linux.android.AndroidResolver;
+import com.github.unidbg.linux.android.XHookImpl;
+import com.github.unidbg.linux.android.dvm.*;
+import com.github.unidbg.memory.Memory;
+import com.github.unidbg.memory.MemoryBlock;
+import com.github.unidbg.pointer.UnicornPointer;
+import com.github.unidbg.utils.Inspector;
 
 import java.io.File;
 import java.io.IOException;
@@ -33,11 +30,11 @@ public class JniDispatch64 extends AbstractJni {
         return new AndroidResolver(23);
     }
 
-    private static ARMEmulator createARMEmulator() {
+    private static AndroidEmulator createARMEmulator() {
         return new AndroidARM64Emulator("com.sun.jna");
     }
 
-    private final ARMEmulator emulator;
+    private final AndroidEmulator emulator;
     private final VM vm;
     private final Module module;
 
@@ -81,19 +78,24 @@ public class JniDispatch64 extends AbstractJni {
         IxHook xHook = XHookImpl.getInstance(emulator);
         xHook.register("libjnidispatch.so", "malloc", new ReplaceCallback() {
             @Override
-            public HookStatus onCall(Emulator emulator, long originFunction) {
-                int size = emulator.getContext().getIntArg(0);
+            public HookStatus onCall(Emulator<?> emulator, HookContext context, long originFunction) {
+                int size = context.getIntArg(0);
                 System.out.println("malloc=" + size);
+                context.set("size", size);
                 return HookStatus.RET(emulator, originFunction);
+            }
+            @Override
+            public void postCall(Emulator<?> emulator, HookContext context) {
+                System.out.println("malloc=" + context.get("size") + ", ret=" + context.getPointerArg(0));
             }
         });
         xHook.refresh();
 
         IWhale whale = Whale.getInstance(emulator);
         Symbol free = emulator.getMemory().findModule("libc.so").findSymbolByName("free");
-        whale.WInlineHookFunction(free, new ReplaceCallback() {
+        whale.inlineHookFunction(free, new ReplaceCallback() {
             @Override
-            public HookStatus onCall(Emulator emulator, long originFunction) {
+            public HookStatus onCall(Emulator<?> emulator, long originFunction) {
                 System.out.println("WInlineHookFunction free=" + emulator.getContext().getPointerArg(0));
                 return HookStatus.RET(emulator, originFunction);
             }
@@ -112,7 +114,7 @@ public class JniDispatch64 extends AbstractJni {
         Symbol newJavaString = module.findSymbolByName("newJavaString");
         hookZz.wrap(newJavaString, new WrapCallback<RegisterContext>() {
             @Override
-            public void preCall(Emulator emulator, RegisterContext ctx, HookEntryInfo info) {
+            public void preCall(Emulator<?> emulator, RegisterContext ctx, HookEntryInfo info) {
                 Pointer value = ctx.getPointerArg(1);
                 Pointer encoding = ctx.getPointerArg(2);
                 System.out.println("newJavaString value=" + value.getString(0) + ", encoding=" + encoding.getString(0));
