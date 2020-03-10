@@ -1,5 +1,6 @@
 package com.github.unidbg;
 
+import com.github.unidbg.arm.ARMSvcMemory;
 import com.github.unidbg.arm.Arguments;
 import com.github.unidbg.arm.context.RegisterContext;
 import com.github.unidbg.debugger.DebugServer;
@@ -23,10 +24,7 @@ import com.sun.jna.Pointer;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import unicorn.Arm64Const;
-import unicorn.ArmConst;
-import unicorn.Unicorn;
-import unicorn.UnicornException;
+import unicorn.*;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -64,8 +62,9 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
     private final RegisterContext registerContext;
 
     private final FileSystem<T> fileSystem;
+    protected final SvcMemory svcMemory;
 
-    public AbstractEmulator(int unicorn_arch, int unicorn_mode, String processName, File rootDir) {
+    public AbstractEmulator(int unicorn_arch, int unicorn_mode, String processName, long svcBase, int svcSize, File rootDir) {
         super();
 
         if (rootDir == null) {
@@ -91,6 +90,11 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
         this.pid = Integer.parseInt(pid);
 
         setContextEmulator(this);
+        this.svcMemory = new ARMSvcMemory(unicorn, svcBase, svcSize, this);
+    }
+
+    public final SvcMemory getSvcMemory() {
+        return svcMemory;
     }
 
     @Override
@@ -150,7 +154,7 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
 
     @Override
     public Debugger attach() {
-        return attach(DebuggerType.SIMPLE);
+        return attach(DebuggerType.CONSOLE);
     }
 
     @Override
@@ -171,9 +175,9 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
             case ANDROID_SERVER_V7:
                 debugger = new AndroidServer(this, DebugServer.IDA_PROTOCOL_VERSION_V7);
                 break;
-            case SIMPLE:
+            case CONSOLE:
             default:
-                debugger = createDebugger();
+                debugger = createConsoleDebugger();
                 break;
         }
         if (debugger == null) {
@@ -181,7 +185,7 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
         }
 
         if (!debugger.isSoftBreakpoint()) {
-            this.unicorn.hook_add(debugger, begin, end, this);
+            this.unicorn.hook_add_new(debugger, begin, end, this);
         }
         this.timeout = 0;
         return debugger;
@@ -189,10 +193,10 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
 
     @Override
     public Debugger attach(long begin, long end) {
-        return attach(begin, end, DebuggerType.SIMPLE);
+        return attach(begin, end, DebuggerType.CONSOLE);
     }
 
-    protected abstract Debugger createDebugger();
+    protected abstract Debugger createConsoleDebugger();
 
     @Override
     public int getPid() {
@@ -302,6 +306,9 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
         final Pointer pointer = UnicornPointer.pointer(this, begin);
         long start = 0;
         PrintStream redirect = null;
+        Unicorn.UnHook readUnHook = null;
+        Unicorn.UnHook writeUnHook = null;
+        Unicorn.UnHook codeUnHook = null;
         try {
             setContextEmulator(this);
 
@@ -319,14 +326,14 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
                     readHook.redirect = redirect;
                     readHook.traceReadListener = traceReadListener;
                     traceReadListener = null;
-                    unicorn.hook_add(readHook, traceMemoryReadBegin, traceMemoryReadEnd, this);
+                    readUnHook = unicorn.hook_add_new((ReadHook) readHook, traceMemoryReadBegin, traceMemoryReadEnd, this);
                 }
                 if (traceMemoryWrite) {
                     traceMemoryWrite = false;
                     writeHook.redirect = redirect;
                     writeHook.traceWriteListener = traceWriteListener;
                     traceWriteListener = null;
-                    unicorn.hook_add(writeHook, traceMemoryWriteBegin, traceMemoryWriteEnd, this);
+                    writeUnHook = unicorn.hook_add_new((WriteHook) writeHook, traceMemoryWriteBegin, traceMemoryWriteEnd, this);
                 }
             }
             if (traceInstruction) {
@@ -334,7 +341,7 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
                 codeHook.initialize(traceInstructionBegin, traceInstructionEnd, traceCodeListener);
                 traceCodeListener = null;
                 codeHook.redirect = redirect;
-                unicorn.hook_add(codeHook, traceInstructionBegin, traceInstructionEnd, this);
+                codeUnHook = unicorn.hook_add_new(codeHook, traceInstructionBegin, traceInstructionEnd, this);
             }
             if (log.isDebugEnabled()) {
                 log.debug("emulate " + pointer + " started sp=" + getStackPointer());
@@ -362,13 +369,19 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
         } finally {
             running = false;
 
+            if (readUnHook != null) {
+                readUnHook.unhook();
+            }
+            if (writeUnHook != null) {
+                writeUnHook.unhook();
+            }
+            if (codeUnHook != null) {
+                codeUnHook.unhook();
+            }
             if (entry) {
-                unicorn.hook_del(readHook);
-                unicorn.hook_del(writeHook);
                 readHook.redirect = null;
                 writeHook.redirect = null;
             }
-            unicorn.hook_del(codeHook);
             codeHook.redirect = null;
             if (log.isDebugEnabled()) {
                 log.debug("emulate " + pointer + " finished sp=" + getStackPointer() + ", offset=" + (System.currentTimeMillis() - start) + "ms");
@@ -393,7 +406,7 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
 
             closeInternal();
 
-            // unicorn.close(); // May cause crash
+             unicorn.close();
         } finally {
             closed = true;
         }

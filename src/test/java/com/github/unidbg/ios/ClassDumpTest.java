@@ -28,7 +28,10 @@ public class ClassDumpTest extends EmulatorTest<DarwinARMEmulator> {
         return new DarwinARMEmulator(new File("target/rootfs/classdump"));
     }
 
-    public void testClassDump() {
+    public void testIgnore() {
+    }
+
+    private void processClassDump() {
         MachOLoader loader = (MachOLoader) emulator.getMemory();
         loader.setCallInitFunction();
         loader.setObjcRuntime(true);
@@ -45,7 +48,7 @@ public class ClassDumpTest extends EmulatorTest<DarwinARMEmulator> {
                 Pointer SEL = context.getPointerArg(1);
                 Pointer name = context.getPointerArg(2);
                 String className = name.getString(0);
-                context.set("className", className);
+                context.push(className);
                 if (!"NSLocale".equals(className)) {
                     return HookStatus.RET(emulator, originFunction);
                 }
@@ -57,7 +60,7 @@ public class ClassDumpTest extends EmulatorTest<DarwinARMEmulator> {
             }
             @Override
             public void postCall(Emulator<?> emulator, HookContext context) {
-                System.err.println("postCall className=" + context.get("className"));
+                System.err.println("postCall className=" + context.pop());
             }
         }, true);
 
@@ -69,12 +72,14 @@ public class ClassDumpTest extends EmulatorTest<DarwinARMEmulator> {
 
         ObjcObject str = oClassDump.callObjc("my_dump_class:", "NSDictionary");
         System.out.println(str.getDescription());
+
+        classDumper.searchClass("ClassD");
     }
 
     public static void main(String[] args) throws Exception {
         ClassDumpTest test = new ClassDumpTest();
         test.setUp();
-        test.testClassDump();
+        test.processClassDump();
         test.tearDown();
     }
 

@@ -32,6 +32,18 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
     public final Map<Integer, LinuxThread> threadMap = new HashMap<>(5);
     public int lastThread = -1;
 
+    protected boolean verbose;
+
+    @Override
+    public void setVerbose(boolean verbose) {
+        this.verbose = verbose;
+    }
+
+    @Override
+    public boolean isVerbose() {
+        return verbose;
+    }
+
     protected final int getMinFd() {
         int last_fd = -1;
         for (int fd : fdMap.keySet()) {
@@ -59,7 +71,9 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
                 emulator.getMemory().setErrno(0);
                 return result;
             } else if (result != null) {
-                failResult = result;
+                if (failResult == null || !failResult.isFallback()) {
+                    failResult = result;
+                }
             }
         }
         FileResult<T> result = emulator.getFileSystem().open(pathname, oflags);
@@ -81,6 +95,10 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
                     }
                 }
             }
+        }
+
+        if (failResult != null && failResult.isFallback()) {
+            return FileResult.success(failResult.io);
         }
         return failResult;
     }
@@ -189,7 +207,25 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
             emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
-        return file.read(emulator.getUnicorn(), buffer, count);
+        int read = file.read(emulator.getUnicorn(), buffer, count);
+        if (verbose) {
+            System.out.println(String.format("Read %d bytes from '%s'", read, file));
+        }
+        return read;
+    }
+
+    protected final int close(Emulator<?> emulator, int fd) {
+        FileIO file = fdMap.remove(fd);
+        if (file != null) {
+            file.close();
+            if (verbose) {
+                System.out.println(String.format("File closed '%s'", file));
+            }
+            return 0;
+        } else {
+            emulator.getMemory().setErrno(UnixEmulator.EBADF);
+            return -1;
+        }
     }
 
     @Override
@@ -200,6 +236,9 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
         if (resolveResult != null && resolveResult.isSuccess()) {
             emulator.getMemory().setErrno(0);
             this.fdMap.put(minFd, resolveResult.io);
+            if (verbose) {
+                System.out.println(String.format("File opened '%s'", resolveResult.io));
+            }
             return minFd;
         }
 
@@ -207,6 +246,9 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
         if (result != null && result.isSuccess()) {
             emulator.getMemory().setErrno(0);
             this.fdMap.put(minFd, result.io);
+            if (verbose) {
+                System.out.println(String.format("File opened '%s'", result.io));
+            }
             return minFd;
         }
 
@@ -214,6 +256,9 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
         if (driverIO != null) {
             emulator.getMemory().setErrno(0);
             this.fdMap.put(minFd, driverIO);
+            if (verbose) {
+                System.out.println(String.format("File opened '%s'", driverIO));
+            }
             return minFd;
         }
 
@@ -236,7 +281,15 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
             emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
-        return file.fcntl(cmd, arg);
+        return file.fcntl(emulator, cmd, arg);
+    }
+
+    protected int readlink(Emulator<?> emulator, String path, Pointer buf, int bufSize) {
+        if (log.isDebugEnabled()) {
+            log.debug("readlink path=" + path + ", buf=" + buf + ", bufSize=" + bufSize);
+        }
+        buf.setString(0, path);
+        return path.length() + 1;
     }
 
     private final Map<Integer, byte[]> sigMap = new HashMap<>();
@@ -254,12 +307,13 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
     private static final int SIGPIPE = 13;
     private static final int SIGALRM = 14;
     private static final int SIGTERM = 15;
-    private static final int SIGCHLD = 17;
+    protected static final int SIGCHLD = 17;
     private static final int SIGTSTP = 20;
     private static final int SIGTTIN = 21;
     private static final int SIGTTOU = 22;
     private static final int SIGWINCH = 28;
     private static final int SIGSYS = 31; /* Bad system call.  */
+    private static final int SIGRTMIN = 32;
 
     protected final int sigaction(int signum, Pointer act, Pointer oldact) {
         String prefix = "Unknown";
@@ -298,6 +352,7 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
             case SIGTTOU:
             case SIGWINCH:
             case SIGSYS:
+            case SIGRTMIN:
                 if (act != null) {
                     sigMap.put(signum, act.getByteArray(0, ACT_SIZE));
                 }
@@ -372,7 +427,11 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
             emulator.getMemory().setErrno(UnixEmulator.EBADF);
             return -1;
         }
-        return file.write(data);
+        int write = file.write(data);
+        if (verbose) {
+            System.out.println(String.format("Write %d bytes to '%s'", write, file));
+        }
+        return write;
     }
 
     @SuppressWarnings("unused")

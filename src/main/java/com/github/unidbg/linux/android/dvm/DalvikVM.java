@@ -1384,6 +1384,9 @@ public class DalvikVM extends BaseVM implements VM {
             public long handle(Emulator<?> emulator) {
                 StringObject string = getObject(UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R1).toUIntPeer());
                 Pointer pointer = UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_R2);
+                if (verbose) {
+                    System.out.println(String.format("JNIEnv->ReleaseStringUTFChars(%s) was called from %s", string, UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_LR)));
+                }
                 if (log.isDebugEnabled()) {
                     log.debug("ReleaseStringUTFChars string=" + string + ", pointer=" + pointer + ", lr=" + UnicornPointer.register(emulator, ArmConst.UC_ARM_REG_LR));
                 }
@@ -1428,7 +1431,7 @@ public class DalvikVM extends BaseVM implements VM {
                 DvmObject<?> obj = size == 0 ? null : getObject(initialElement.toUIntPeer());
                 DvmObject<?>[] array = new DvmObject[size];
                 for (int i = 0; i < size; i++) {
-                    array[i] = new DvmObject<>(dvmClass, obj);
+                    array[i] = obj;
                 }
 
                 return addObject(new ArrayObject(array), false);

@@ -90,7 +90,7 @@ public class Substrate extends BaseHook implements ISubstrate {
     @Override
     public Symbol findSymbol(Module image, String name) {
         MachOModule mm = (MachOModule) image;
-        Number[] numbers = _MSFindSymbol.call(emulator, UnicornPointer.pointer(emulator, mm.machHeader), name);
+        Number[] numbers = _MSFindSymbol.call(emulator, mm == null ? null : UnicornPointer.pointer(emulator, mm.machHeader), name);
         long ret = numberToAddress(numbers[0]);
         if (ret == 0) {
             return null;
@@ -111,7 +111,7 @@ public class Substrate extends BaseHook implements ISubstrate {
 
     @Override
     public void hookFunction(Symbol symbol, ReplaceCallback callback, boolean enablePostCall) {
-        hookFunction(symbol.getAddress(), callback, false);
+        hookFunction(symbol.getAddress(), callback, enablePostCall);
     }
 
     @Override

@@ -8,7 +8,6 @@ import com.github.unidbg.pointer.UnicornPointer;
 import com.sun.jna.Pointer;
 import keystone.Keystone;
 import keystone.KeystoneArchitecture;
-import keystone.KeystoneEncoded;
 import keystone.KeystoneMode;
 import org.apache.commons.codec.DecoderException;
 import unicorn.Arm64Const;
@@ -110,6 +109,10 @@ class SimpleARM64Debugger extends AbstractARMDebugger implements Debugger {
                         }
                         continue;
                     }
+                }
+                if ("where".equals(line)) {
+                    new Exception("here").printStackTrace(System.out);
+                    continue;
                 }
                 if (line.startsWith("w")) {
                     String command;
@@ -290,6 +293,7 @@ class SimpleARM64Debugger extends AbstractARMDebugger implements Debugger {
         System.out.println("blr: add temporarily breakpoint of register LR");
         System.out.println();
         System.out.println("p (assembly): patch assembly at PC address");
+        System.out.println("where: show java stack trace");
         System.out.println();
         System.out.println("vm: view loaded modules");
         System.out.println("d|dis: show disassemble");
@@ -300,14 +304,6 @@ class SimpleARM64Debugger extends AbstractARMDebugger implements Debugger {
     @Override
     protected Keystone createKeystone(boolean isThumb) {
         return new Keystone(KeystoneArchitecture.Arm64, KeystoneMode.LittleEndian);
-    }
-
-    @Override
-    protected byte[] addSoftBreakPoint(long address, int svcNumber) {
-        try (Keystone keystone = createKeystone(false)) {
-            KeystoneEncoded encoded = keystone.assemble("brk #" + svcNumber);
-            return encoded.getMachineCode();
-        }
     }
 
 }

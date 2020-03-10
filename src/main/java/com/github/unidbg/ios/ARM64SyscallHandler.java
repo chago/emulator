@@ -182,7 +182,7 @@ public class ARM64SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
                     u.reg_write(Arm64Const.UC_ARM64_REG_X0, write(emulator, 0));
                     return;
                 case 6:
-                    u.reg_write(Arm64Const.UC_ARM64_REG_X0, close(emulator, 0));
+                    u.reg_write(Arm64Const.UC_ARM64_REG_X0, closeWithOffset(emulator, 0));
                     return;
                 case 10:
                     u.reg_write(Arm64Const.UC_ARM64_REG_X0, unlink(emulator));
@@ -219,6 +219,7 @@ public class ARM64SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
                     u.reg_write(Arm64Const.UC_ARM64_REG_X0, 0);
                     return;
                 case 92:
+                case 406: // fcntl_NOCANCEL
                     u.reg_write(Arm64Const.UC_ARM64_REG_X0, fcntl(emulator));
                     return;
                 case 97:
@@ -450,7 +451,7 @@ public class ARM64SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
                 u.reg_write(Arm64Const.UC_ARM64_REG_X0, open_NOCANCEL(emulator, 1));
                 return true;
             case 6:
-                u.reg_write(Arm64Const.UC_ARM64_REG_X0, close(emulator, 1));
+                u.reg_write(Arm64Const.UC_ARM64_REG_X0, closeWithOffset(emulator, 1));
                 return true;
             case 190:
                 u.reg_write(Arm64Const.UC_ARM64_REG_X0, lstat(emulator, 1));
@@ -603,21 +604,14 @@ public class ARM64SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
         return 0;
     }
 
-    private int close(Emulator<?> emulator, int offset) {
+    private int closeWithOffset(Emulator<?> emulator, int offset) {
         RegisterContext context = emulator.getContext();
         int fd = context.getIntArg(offset);
         if (log.isDebugEnabled()) {
             log.debug("close fd=" + fd);
         }
 
-        FileIO file = fdMap.remove(fd);
-        if (file != null) {
-            file.close();
-            return 0;
-        } else {
-            emulator.getMemory().setErrno(UnixEmulator.EBADF);
-            return -1;
-        }
+        return close(emulator, fd);
     }
 
     private int lseek(Emulator<?> emulator) {
@@ -1023,7 +1017,7 @@ public class ARM64SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
                 if (action == 3) {
                     String sub = set0.getString(0);
                     if (log.isDebugEnabled()) {
-                        log.debug("sysctl CTL_UNSPEC action=" + action + ", namelen=" + namelen + ", buffer=" + buffer + ", bufferSize=" + bufferSize + ", sub=" + sub);
+                        log.debug("sysctl CTL_UNSPEC action=" + action + ", namelen=" + namelen + ", buffer=" + buffer + ", bufferSize=" + bufferSize + ", sub=" + sub + ", set1=" + set1);
                     }
                     if ("kern.osrelease".equals(sub)) {
                         buffer.setInt(0, CTL_KERN);
@@ -1031,7 +1025,10 @@ public class ARM64SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
                         bufferSize.setLong(0, 8);
                         return 0;
                     }
-                    return 1;
+                    if (log.isDebugEnabled()) {
+                        emulator.attach().debug();
+                    }
+                    return -1;
                 }
                 log.info("sysctl CTL_UNSPEC action=" + action + ", namelen=" + namelen + ", buffer=" + buffer + ", bufferSize=" + bufferSize + ", set0=" + set0 + ", set1=" + set1);
                 break;
@@ -2045,14 +2042,7 @@ public class ARM64SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
             log.debug("close_NOCANCEL fd=" + fd);
         }
 
-        FileIO file = fdMap.remove(fd);
-        if (file != null) {
-            file.close();
-            return 0;
-        } else {
-            emulator.getMemory().setErrno(UnixEmulator.EBADF);
-            return -1;
-        }
+        return closeWithOffset(emulator, fd);
     }
 
     private int read_NOCANCEL(Emulator<?> emulator, int offset) {
