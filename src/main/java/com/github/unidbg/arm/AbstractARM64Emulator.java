@@ -64,6 +64,7 @@ public abstract class AbstractARM64Emulator<T extends NewFileIO> extends Abstrac
         unicorn.hook_add_new(syscallHandler, this);
 
         this.capstoneArm64 = new Capstone(Capstone.CS_ARCH_ARM64, Capstone.CS_MODE_ARM);
+        this.capstoneArm64.setDetail(Capstone.CS_OPT_ON);
     }
 
     @Override
@@ -92,7 +93,7 @@ public abstract class AbstractARM64Emulator<T extends NewFileIO> extends Abstrac
 
     @Override
     protected Debugger createConsoleDebugger() {
-        return new SimpleARM64Debugger(this, false);
+        return new SimpleARM64Debugger(this);
     }
 
     @Override
@@ -148,11 +149,11 @@ public abstract class AbstractARM64Emulator<T extends NewFileIO> extends Abstrac
     }
 
     @Override
-    public Capstone.CsInsn[] disassemble(long address, byte[] code, boolean thumb) {
+    public Capstone.CsInsn[] disassemble(long address, byte[] code, boolean thumb, long count) {
         if (thumb) {
             throw new IllegalStateException();
         }
-        return capstoneArm64.disasm(code, address);
+        return capstoneArm64.disasm(code, address, count);
     }
 
     private void printAssemble(PrintStream out, Capstone.CsInsn[] insns, long address) {

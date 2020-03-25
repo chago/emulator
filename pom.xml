@@ -4,49 +4,37 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.github</groupId>
+    <groupId>com.github.zhkl0228</groupId>
     <artifactId>unidbg</artifactId>
     <version>0.3.0-SNAPSHOT</version>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
-    <profiles>
-        <profile>
-            <id>osx64</id>
-            <activation>
-                <activeByDefault>true</activeByDefault>
-            </activation>
-            <properties>
-                <dynamic.lib.location>prebuilt/osx64</dynamic.lib.location>
-            </properties>
-        </profile>
-        <profile>
-            <id>linux64</id>
-            <properties>
-                <dynamic.lib.location>prebuilt/linux64</dynamic.lib.location>
-            </properties>
-        </profile>
-        <profile>
-            <id>win32</id>
-            <properties>
-                <dynamic.lib.location>prebuilt/win32</dynamic.lib.location>
-            </properties>
-        </profile>
-        <profile>
-            <id>win64</id>
-            <properties>
-                <dynamic.lib.location>prebuilt/win64</dynamic.lib.location>
-            </properties>
-        </profile>
-    </profiles>
+    <name>unidbg</name>
+    <description>Allows you to emulate an Android ARM32 and/or ARM64 native library</description>
+    <url>https://github.com/zhkl0228/unidbg</url>
+    <licenses>
+        <license>
+            <name>The Apache Software License, Version 2.0</name>
+            <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+        </license>
+    </licenses>
+    <developers>
+        <developer>
+            <name>zhkl0228</name>
+            <email>zhkl0228@gmail.com</email>
+        </developer>
+    </developers>
+    <scm>
+        <connection>scm:git:git@github.com:zhkl0228/unidbg.git</connection>
+        <developerConnection>scm:git:git@github.com:zhkl0228/unidbg.git</developerConnection>
+        <url>git@github.com:zhkl0228/unidbg.git</url>
+    </scm>
     <build>
         <plugins>
             <plugin>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>2.12.4</version>
-                <configuration>
-                    <argLine>-Djava.library.path=${dynamic.lib.location} -Djna.library.path=${dynamic.lib.location}</argLine>
-                </configuration>
             </plugin>
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -83,45 +71,41 @@
                     </execution>
                 </executions>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-gpg-plugin</artifactId>
+                <version>1.5</version>
+                <executions>
+                    <execution>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>sign</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
     <dependencies>
         <dependency>
-            <groupId>org.unicorn-engine</groupId>
+            <groupId>com.github.zhkl0228</groupId>
             <artifactId>unicorn</artifactId>
-            <version>1.0.3</version>
-            <!--
-            <scope>system</scope>
-            <systemPath>${basedir}/prebuilt/jar/unicorn-1.0.3.jar</systemPath>
-            -->
+            <version>1.0.9</version>
         </dependency>
         <dependency>
-            <groupId>org.capstone-engine</groupId>
+            <groupId>com.github.zhkl0228</groupId>
             <artifactId>capstone</artifactId>
-            <version>3.0.5</version>
-            <!--
-            <scope>system</scope>
-            <systemPath>${basedir}/prebuilt/jar/capstone-3.0.5.jar</systemPath>
-            -->
+            <version>3.0.8</version>
         </dependency>
         <dependency>
-            <groupId>keystone</groupId>
-            <artifactId>java-bindings</artifactId>
-            <version>0.9.1-2</version>
-            <!--
-            <scope>system</scope>
-            <systemPath>${basedir}/prebuilt/jar/java-bindings-0.9.1-2.jar</systemPath>
-            -->
+            <groupId>com.github.zhkl0228</groupId>
+            <artifactId>keystone</artifactId>
+            <version>0.9.2</version>
         </dependency>
         <dependency>
             <groupId>commons-codec</groupId>
             <artifactId>commons-codec</artifactId>
             <version>1.6</version>
-        </dependency>
-        <dependency>
-            <groupId>net.java.dev.jna</groupId>
-            <artifactId>jna</artifactId>
-            <version>4.5.2</version>
         </dependency>
         <dependency>
             <groupId>commons-io</groupId>
@@ -179,30 +163,14 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
-    <repositories>
-        <repository>
-            <id>nexus</id>
-            <url>http://p.gzmtx.cn:8081/nexus/content/groups/public/</url>
-            <releases>
-                <enabled>true</enabled>
-                <updatePolicy>always</updatePolicy>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-                <updatePolicy>always</updatePolicy>
-            </snapshots>
-        </repository>
-    </repositories>
     <distributionManagement>
-        <repository>
-            <id>releases</id>
-            <name>Releases Repository</name>
-            <url>http://p.gzmtx.cn:8081/nexus/content/repositories/releases/</url>
-        </repository>
         <snapshotRepository>
-            <id>snapshots</id>
-            <name>Snapshots Repository</name>
-            <url>http://p.gzmtx.cn:8081/nexus/content/repositories/snapshots/</url>
+            <id>oss</id>
+            <url>https://oss.sonatype.org/content/repositories/snapshots/</url>
         </snapshotRepository>
+        <repository>
+            <id>oss</id>
+            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+        </repository>
     </distributionManagement>
 </project>

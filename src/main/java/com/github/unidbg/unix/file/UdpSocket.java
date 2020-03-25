@@ -2,7 +2,11 @@ package com.github.unidbg.unix.file;
 
 import com.github.unidbg.Emulator;
 import com.github.unidbg.file.FileIO;
+import com.github.unidbg.linux.struct.IFConf;
+import com.github.unidbg.linux.struct.IFReq;
+import com.github.unidbg.pointer.UnicornPointer;
 import com.github.unidbg.unix.UnixEmulator;
+import com.github.unidbg.unix.struct.SockAddr;
 import com.github.unidbg.utils.Inspector;
 import com.sun.jna.Pointer;
 import org.apache.commons.logging.Log;
@@ -11,6 +15,11 @@ import unicorn.Unicorn;
 
 import java.io.IOException;
 import java.net.*;
+import java.nio.BufferOverflowException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Enumeration;
+import java.util.List;
 
 public class UdpSocket extends SocketIO implements FileIO {
 
@@ -150,5 +159,83 @@ public class UdpSocket extends SocketIO implements FileIO {
     @Override
     protected int getTcpNoDelay() {
         throw new AbstractMethodError();
+    }
+
+    @Override
+    public int ioctl(Emulator<?> emulator, long request, long argp) {
+        if (request == SIOCGIFCONF) {
+            return getIFaceList(emulator, argp);
+        }
+
+        return super.ioctl(emulator, request, argp);
+    }
+
+    public static class NetworkIF {
+        private final String ifName;
+        private final Inet4Address ipv4;
+        public NetworkIF(String ifName, Inet4Address ipv4) {
+            this.ifName = ifName;
+            this.ipv4 = ipv4;
+        }
+        @Override
+        public String toString() {
+            return ifName;
+        }
+    }
+
+    protected List<NetworkIF> getNetworkIFs() throws SocketException {
+        Enumeration<NetworkInterface> enumeration = NetworkInterface.getNetworkInterfaces();
+        List<NetworkIF> list = new ArrayList<>();
+        while (enumeration.hasMoreElements()) {
+            NetworkInterface networkInterface = enumeration.nextElement();
+            Enumeration<InetAddress> addressEnumeration = networkInterface.getInetAddresses();
+            while (addressEnumeration.hasMoreElements()) {
+                InetAddress address = addressEnumeration.nextElement();
+                if (address instanceof Inet4Address) {
+                    list.add(new NetworkIF(networkInterface.getName(), (Inet4Address) address));
+                    break;
+                }
+            }
+        }
+        if (log.isDebugEnabled()) {
+            log.debug("Return host network ifs: " + list);
+        }
+        if (emulator.getSyscallHandler().isVerbose()) {
+            System.out.println("Return host network ifs: " + list);
+        }
+        return list;
+    }
+
+    private int getIFaceList(Emulator<?> emulator, long argp) {
+        try {
+            List<NetworkIF> list = getNetworkIFs();
+            IFConf conf = new IFConf(UnicornPointer.pointer(emulator, argp));
+            IFReq ifReq = IFReq.createIFReq(emulator, conf.ifcu_req);
+            if (list.size() * ifReq.size() > conf.ifc_len) {
+                throw new BufferOverflowException();
+            }
+
+            conf.ifc_len = list.size() * ifReq.size();
+            conf.pack();
+
+            Pointer pointer = conf.ifcu_req;
+            for (NetworkIF networkIF : list) {
+                ifReq = IFReq.createIFReq(emulator, pointer);
+                ifReq.setName(networkIF.ifName);
+                ifReq.pack();
+
+                SockAddr sockAddr = new SockAddr(ifReq.getAddrPointer());
+                sockAddr.sin_family = AF_INET;
+                sockAddr.sin_port = 0;
+                sockAddr.sin_addr = Arrays.copyOf(networkIF.ipv4.getAddress(), IPV4_ADDR_LEN - 4);
+                sockAddr.pack();
+
+                pointer = pointer.share(ifReq.size());
+            }
+
+            return 0;
+        } catch (SocketException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }

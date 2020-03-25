@@ -10,11 +10,6 @@ This is an educational project to learn more about the ELF file format and ARM a
 - [IntelliJ IDEA](https://www.jetbrains.com/idea?from=unidbg) can be used to edit unidbg sources.
 - ![](assets/idea_logo.svg)
 
-## Usage
-
-VM options: -Djava.library.path=prebuilt/os -Djna.library.path=prebuilt/os  
-Where os may: linux64, win32, win64, osx64
-
 Simple tests under src/test directory
 - [src/test/java/com/bytedance/frameworks/core/encrypt/TTEncrypt.java](https://github.com/zhkl0228/unidbg/blob/master/src/test/java/com/bytedance/frameworks/core/encrypt/TTEncrypt.java)  
 
@@ -50,7 +45,7 @@ Simple tests under src/test directory
 - ~~Add more iOS syscall.~~
 
 ## Thanks
-- [unicorn](https://github.com/unicorn-engine/unicorn)
+- [unicorn](https://github.com/zhkl0228/unicorn)
 - [HookZz](https://github.com/jmpews/HookZz)
 - [xHook](https://github.com/iqiyi/xHook)
 - [AndroidNativeEmu](https://github.com/AeonLucid/AndroidNativeEmu)

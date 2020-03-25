@@ -66,9 +66,9 @@ public abstract class AbstractARMEmulator<T extends NewFileIO> extends AbstractE
         unicorn.hook_add_new(syscallHandler, this);
 
         this.capstoneArm = new Capstone(Capstone.CS_ARCH_ARM, Capstone.CS_MODE_ARM);
-        // this.capstoneArm.setDetail(Capstone.CS_OPT_ON);
+        this.capstoneArm.setDetail(Capstone.CS_OPT_ON);
         this.capstoneThumb = new Capstone(Capstone.CS_ARCH_ARM, Capstone.CS_MODE_THUMB);
-        // this.capstoneThumb.setDetail(Capstone.CS_OPT_ON);
+        this.capstoneThumb.setDetail(Capstone.CS_OPT_ON);
 
         setupTraps();
     }
@@ -114,7 +114,7 @@ public abstract class AbstractARMEmulator<T extends NewFileIO> extends AbstractE
 
     @Override
     protected Debugger createConsoleDebugger() {
-        return new SimpleARMDebugger(this, false);
+        return new SimpleARMDebugger(this);
     }
 
     @Override
@@ -172,8 +172,8 @@ public abstract class AbstractARMEmulator<T extends NewFileIO> extends AbstractE
     }
 
     @Override
-    public Capstone.CsInsn[] disassemble(long address, byte[] code, boolean thumb) {
-        return thumb ? capstoneThumb.disasm(code, address) : capstoneArm.disasm(code, address);
+    public Capstone.CsInsn[] disassemble(long address, byte[] code, boolean thumb, long count) {
+        return thumb ? capstoneThumb.disasm(code, address, count) : capstoneArm.disasm(code, address, count);
     }
 
     private void printAssemble(PrintStream out, Capstone.CsInsn[] insns, long address, boolean thumb) {
