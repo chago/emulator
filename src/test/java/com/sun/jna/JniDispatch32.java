@@ -40,11 +40,10 @@ public class JniDispatch32 extends AbstractJni {
 
     private final DvmClass Native;
 
-    private JniDispatch32() throws IOException {
+    private JniDispatch32() {
         emulator = createARMEmulator();
         final Memory memory = emulator.getMemory();
         memory.setLibraryResolver(createLibraryResolver());
-        memory.setCallInitFunction();
 
         vm = emulator.createDalvikVM(null);
         vm.setJni(this);

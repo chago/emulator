@@ -37,11 +37,10 @@ public class QDReaderJni extends AbstractJni implements ModuleListener {
 
     private final DvmClass d;
 
-    private QDReaderJni() throws IOException {
+    private QDReaderJni() {
         emulator = createARMEmulator();
         final Memory memory = emulator.getMemory();
         memory.setLibraryResolver(createLibraryResolver());
-        memory.setCallInitFunction();
         memory.addModuleListener(this);
 
         vm = emulator.createDalvikVM(null);
