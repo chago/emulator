@@ -1193,7 +1193,7 @@ public class ARM32SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
                     if ("kern.boottime".equals(sub)) {
                         buffer.setInt(0, CTL_KERN);
                         buffer.setInt(4, KERN_BOOTTIME);
-                        bufferSize.setInt(0, UnicornStructure.calculateSize(TimeVal32.class));
+                        bufferSize.setInt(0, 8);
                         return 0;
                     }
                     if ("hw.machine".equals(sub)) {
@@ -1530,7 +1530,13 @@ public class ARM32SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
         boolean anywhere = (flags & MachO.VM_FLAGS_ANYWHERE) != 0;
         if (!anywhere) {
             long start = address.getInt(0) & 0xffffffffL;
-            emulator.getMemory().mmap2(start, (int) size, UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE, MAP_MY_FIXED, -1, 0);
+            long ret = emulator.getMemory().mmap2(start, (int) size, UnicornConst.UC_PROT_READ | UnicornConst.UC_PROT_WRITE, MAP_MY_FIXED, -1, 0);
+            if (ret == 0) {
+                if (log.isDebugEnabled()) {
+                    log.debug("_kernelrpc_mach_vm_allocate_trap fixed, address=" + address.getPointer(0) + ", size=" + size + ", flags=0x" + Integer.toHexString(flags));
+                }
+                return -1;
+            }
             Pointer pointer = address.getPointer(0);
             pointer.write(0, new byte[(int) size], 0, (int) size);
             if (log.isDebugEnabled()) {
