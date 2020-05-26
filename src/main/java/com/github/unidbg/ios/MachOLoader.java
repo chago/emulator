@@ -158,10 +158,10 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
         }
     }
 
-    public final void onExecutableLoaded() {
+    public final void onExecutableLoaded(String executable) {
         if (callInitFunction) {
             for (MachOModule m : modules.values()) {
-                boolean needCallInit = m.allSymbolBound || isPayloadModule(m);
+                boolean needCallInit = m.allSymbolBound || isPayloadModule(m) || m.getPath().equals(executable);
                 if (needCallInit) {
                     m.doInitialization(emulator);
                 }
@@ -503,11 +503,15 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                 }
                 case LOAD_DYLIB:
                     MachO.DylibCommand dylibCommand = (MachO.DylibCommand) command.body();
-                    neededList.add(new NeedLibrary(dylibCommand.name(), false));
+                    neededList.add(new NeedLibrary(dylibCommand.name(), false, false));
                     break;
                 case LOAD_UPWARD_DYLIB:
                     dylibCommand = (MachO.DylibCommand) command.body();
-                    neededList.add(new NeedLibrary(dylibCommand.name(), true));
+                    neededList.add(new NeedLibrary(dylibCommand.name(), true, false));
+                    break;
+                case LOAD_WEAK_DYLIB:
+                    dylibCommand = (MachO.DylibCommand) command.body();
+                    neededList.add(new NeedLibrary(dylibCommand.name(), true, true));
                     break;
                 case SYMTAB:
                     symtabCommand = (MachO.SymtabCommand) command.body();
@@ -587,7 +591,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                     } else {
                         neededLibraries.put(FilenameUtils.getBaseName(needed.name), needed);
                     }
-                } else {
+                } else if(!library.weak) {
                     log.info(dyId + " load dependency " + neededLibrary + " failed");
                 }
             }
@@ -751,6 +755,10 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
             case "__dof_AudioHAL_":
             case "__dof_AudioHAL_0":
             case "__dof_AudioHAL_1":
+            case "__oslogstring":
+            case "__swift_hooks":
+            case "__bit_ios":
+            case "__bit_hockey":
                 break;
             default:
                 boolean isObjc = sectName.startsWith("__objc_");
@@ -1275,16 +1283,38 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
     }
 
     private boolean doBindAt(Log log, long libraryOrdinal, int type, long address, String symbolName, int symbolFlags, long addend, MachOModule module, boolean lazy) {
+        Pointer pointer = UnicornPointer.pointer(emulator, address);
+        if (pointer == null) {
+            throw new IllegalStateException();
+        }
+
         Symbol symbol = module.findSymbolByName(symbolName, true);
         if (symbol == null) {
             if (log.isDebugEnabled()) {
                 log.info("doBindAt type=" + type + ", symbolName=" + symbolName + ", address=0x" + Long.toHexString(address - module.base) + ", lazy=" + lazy + ", upwardLibraries=" + module.upwardLibraries.values() + ", libraryOrdinal=" + libraryOrdinal + ", module=" + module.name);
             }
+            long bindAt = 0;
+            for (HookListener listener : hookListeners) {
+                long hook = listener.hook(emulator.getSvcMemory(), module.name, symbolName, bindAt);
+                if (hook > 0) {
+                    bindAt = hook;
+                    break;
+                }
+            }
+            if (bindAt > 0) {
+                Pointer newPointer = UnicornPointer.pointer(emulator, bindAt);
+                switch (type) {
+                    case BIND_TYPE_POINTER:
+                        pointer.setPointer(0, newPointer);
+                        break;
+                    case BIND_TYPE_TEXT_ABSOLUTE32:
+                    case BIND_TYPE_TEXT_PCREL32:
+                    default:
+                        throw new IllegalStateException("bad bind type " + type);
+                }
+                return true;
+            }
             return false;
-        }
-        Pointer pointer = UnicornPointer.pointer(emulator, address);
-        if (pointer == null) {
-            throw new IllegalStateException();
         }
 
         long bindAt = symbol.getAddress();

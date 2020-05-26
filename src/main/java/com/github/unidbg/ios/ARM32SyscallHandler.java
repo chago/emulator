@@ -178,6 +178,9 @@ public class ARM32SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
                 case -31:
                     u.reg_write(ArmConst.UC_ARM_REG_R0, mach_msg_trap(emulator));
                     return;
+                case -33: // _semaphore_signal_trap
+                    u.reg_write(ArmConst.UC_ARM_REG_R0, _semaphore_signal_trap(emulator));
+                    return;
                 case -36: // _semaphore_wait_trap
                     u.reg_write(ArmConst.UC_ARM_REG_R0, _semaphore_wait_trap(emulator));
                     return;
@@ -748,6 +751,19 @@ public class ARM32SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
     private long _semaphore_wait_trap(Emulator<?> emulator) {
         int port = emulator.getContext().getIntArg(0);
         log.info("_semaphore_wait_trap port=" + port);
+        Log log = ARM32SyscallHandler.log;
+        if (!log.isDebugEnabled()) {
+            log = LogFactory.getLog(AbstractEmulator.class);
+        }
+        if (log.isDebugEnabled()) {
+            createBreaker(emulator).debug();
+        }
+        return 0;
+    }
+
+    private long _semaphore_signal_trap(Emulator<?> emulator) {
+        int port = emulator.getContext().getIntArg(0);
+        log.info("_semaphore_signal_trap port=" + port);
         Log log = ARM32SyscallHandler.log;
         if (!log.isDebugEnabled()) {
             log = LogFactory.getLog(AbstractEmulator.class);
@@ -1534,6 +1550,9 @@ public class ARM32SyscallHandler extends UnixSyscallHandler<DarwinFileIO> implem
             if (ret == 0) {
                 if (log.isDebugEnabled()) {
                     log.debug("_kernelrpc_mach_vm_allocate_trap fixed, address=" + address.getPointer(0) + ", size=" + size + ", flags=0x" + Integer.toHexString(flags));
+                }
+                if (tag != MachO.VM_MEMORY_REALLOC) {
+                    throw new IllegalStateException("_kernelrpc_mach_vm_allocate_trap fixed, address=" + address.getPointer(0) + ", size=" + size + ", flags=0x" + Integer.toHexString(flags) + ", tag=" + tag);
                 }
                 return -1;
             }

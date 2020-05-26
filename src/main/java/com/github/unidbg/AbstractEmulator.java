@@ -345,12 +345,10 @@ public abstract class AbstractEmulator<T extends NewFileIO> implements Emulator<
             if (enterDebug) {
                 e.printStackTrace();
                 attach().debug();
-                IOUtils.closeQuietly(this);
-                throw e;
             } else {
                 log.warn("emulate " + pointer + " exception sp=" + getStackPointer() + ", msg=" + e.getMessage() + ", offset=" + (System.currentTimeMillis() - start) + "ms");
-                return -1;
             }
+            return -1;
         } finally {
             running = false;
 

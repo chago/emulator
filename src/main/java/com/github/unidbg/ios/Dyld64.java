@@ -604,6 +604,9 @@ public class Dyld64 extends Dyld {
                 if (ret == 0) {
                     log.info("dlopen failed: " + path);
                     this.error.setString(0, "Resolve library " + path + " failed");
+                    if (log.isDebugEnabled()) {
+                        emulator.attach().debug();
+                    }
                 }
                 return 0;
             } else {
@@ -661,7 +664,7 @@ public class Dyld64 extends Dyld {
                         public long handle(Emulator<?> emulator) {
                             System.err.println("abort");
                             emulator.attach().debug();
-                            emulator.getUnicorn().reg_write(Arm64Const.UC_ARM64_REG_LR, AbstractARMEmulator.LR);
+                            emulator.getUnicorn().reg_write(Arm64Const.UC_ARM64_REG_LR, AbstractARM64Emulator.LR);
                             return 0;
                         }
                     }).peer;
