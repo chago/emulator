@@ -182,18 +182,36 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
 
     @Override
     protected Module loadInternal(LibraryFile libraryFile, boolean forceCallInit) {
-        return loadInternal(libraryFile, forceCallInit, true);
+        try {
+            return loadInternal(libraryFile, forceCallInit, true);
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
-    private MachOModule loadInternal(LibraryFile libraryFile, boolean forceCallInit, boolean checkBootstrap) {
+    private MachOModule loadInternal(LibraryFile libraryFile, boolean forceCallInit, boolean checkBootstrap) throws IOException {
         MachOModule module = loadInternalPhase(libraryFile, true, checkBootstrap, Collections.<String>emptyList());
 
-        for (MachOModule export : modules.values()) {
-            if (!export.lazyLoadNeededList.isEmpty()) {
+        for (MachOModule export : modules.values().toArray(new MachOModule[0])) {
+            for (NeedLibrary library : export.lazyLoadNeededList.toArray(new NeedLibrary[0])) {
+                String neededLibrary = library.path;
                 if (log.isDebugEnabled()) {
-                    log.debug("Export module resolve needed library failed: " + export.name + ", neededList=" + export.lazyLoadNeededList);
+                    log.debug(export.getPath() + " need dependency " + neededLibrary);
+                }
+
+                MachOModule loaded = modules.get(FilenameUtils.getName(neededLibrary));
+                if (loaded != null) {
+                    continue;
+                }
+                LibraryFile neededLibraryFile = resolveLibrary(libraryFile, neededLibrary, Collections.<String>emptySet());
+                if (neededLibraryFile != null) {
+                    MachOModule needed = loadInternalPhase(neededLibraryFile, true, false, Collections.<String>emptySet());
+                    needed.addReferenceCount();
+                } else if (!library.weak) {
+                    log.info(export.getPath() + " load dependency " + neededLibrary + " failed");
                 }
             }
+            export.lazyLoadNeededList.clear();
         }
 
         for (MachOModule m : modules.values()) {
@@ -268,7 +286,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                     throw new UnsupportedOperationException("cpuType=" + machO.header().cputype());
                 }
                 if (emulator.is64Bit()) {
-                    throw new UnsupportedOperationException("NOT 32 bit executable: " + libraryFile.getName());
+                    throw new UnsupportedOperationException("NOT 64 bit executable: " + libraryFile.getName());
                 }
                 break;
             case MACHO_LE_X64:
@@ -276,7 +294,7 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
                     throw new UnsupportedOperationException("cpuType=" + machO.header().cputype());
                 }
                 if (emulator.is32Bit()) {
-                    throw new UnsupportedOperationException("NOT 64 bit executable: " + libraryFile.getName());
+                    throw new UnsupportedOperationException("NOT 32 bit executable: " + libraryFile.getName());
                 }
                 break;
             default:
@@ -783,79 +801,8 @@ public class MachOLoader extends AbstractLoader<DarwinFileIO> implements Memory,
 
     private void checkSection(String dyId, String segName, String sectName) {
         // __OBJC need fNotifyObjC = true
-        switch (sectName) {
-            case "__text":
-            case "__mod_init_func":
-            case "__cstring":
-            case "__cfstring":
-            case "__nl_symbol_ptr":
-            case "__la_symbol_ptr":
-            case "__picsymbolstub4":
-            case "__stub_helper":
-            case "__const":
-            case "__data":
-            case "__bss":
-            case "__common":
-            case "__gcc_except_tab":
-            case "__constrw":
-            case "__dyld":
-            case "__dof_magmalloc":
-            case "__dof_plockstat":
-            case "__dof_objc_runt":
-            case "__symbolstub1":
-            case "__symbol_stub4":
-            case "__lazy_symbol":
-            case "__ustring":
-            case "__cfstring_CFN":
-            case "__csbitmaps":
-            case "__properties":
-            case "__dof_NSXPCList":
-            case "__dof_Cocoa_Lay":
-            case "__dof_NSXPCProx":
-            case "__dof_NSProgres":
-            case "__dof_NSXPCConn":
-            case "__cf_except_bt":
-            case "__dof_CFRunLoop":
-            case "__dof_Cocoa_Aut":
-            case "__dof_cache":
-            case "__stubs":
-            case "__got":
-            case "__swift5_typeref":
-            case "__swift5_fieldmd":
-            case "__swift5_types":
-            case "__swift5_capture":
-            case "__swift5_reflstr":
-            case "__swift5_assocty":
-            case "__swift5_proto":
-            case "__swift5_builtin":
-            case "__swift5_protos":
-            case "__info_plist":
-            case "__crash_info":
-            case "__thread_vars":
-            case "__thread_bss":
-            case "__thread_data":
-            case "__mod_term_func":
-            case "__dof_CoreImage":
-            case "__dof_opencl_ap":
-            case "__dof_AudioHAL_":
-            case "__dof_AudioHAL_0":
-            case "__dof_AudioHAL_1":
-            case "__oslogstring":
-            case "__swift_hooks":
-            case "__bit_ios":
-            case "__bit_hockey":
-            case "__thread_ptrs":
-                break;
-            default:
-                boolean isObjc = sectName.startsWith("__objc_");
-                if (isObjc) {
-                    if (log.isDebugEnabled()) {
-                        log.debug("checkSection name=" + sectName + ", dyId=" + dyId + ", segName=" + segName);
-                    }
-                } else {
-                    log.info("checkSection name=" + sectName + ", dyId=" + dyId + ", segName=" + segName);
-                }
-                break;
+        if (log.isDebugEnabled()) {
+            log.debug("checkSection name=" + sectName + ", dyId=" + dyId + ", segName=" + segName);
         }
     }
 

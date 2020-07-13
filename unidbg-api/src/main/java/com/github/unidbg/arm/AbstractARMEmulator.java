@@ -2,6 +2,7 @@ package com.github.unidbg.arm;
 
 import capstone.Capstone;
 import com.github.unidbg.AbstractEmulator;
+import com.github.unidbg.Family;
 import com.github.unidbg.Module;
 import com.github.unidbg.arm.context.RegisterContext;
 import com.github.unidbg.arm.context.UnicornArm32RegisterContext;
@@ -26,7 +27,6 @@ import unicorn.Unicorn;
 import unicorn.UnicornConst;
 
 import java.io.File;
-import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
 
@@ -43,8 +43,8 @@ public abstract class AbstractARMEmulator<T extends NewFileIO> extends AbstractE
 
     private final Dlfcn dlfcn;
 
-    public AbstractARMEmulator(String processName, File rootDir, String... envs) {
-        super(UnicornConst.UC_ARCH_ARM, UnicornConst.UC_MODE_ARM, processName, 0xfffe0000L, 0x10000, rootDir);
+    public AbstractARMEmulator(String processName, File rootDir, Family family, String... envs) {
+        super(UnicornConst.UC_ARCH_ARM, UnicornConst.UC_MODE_ARM, processName, 0xfffe0000L, 0x10000, rootDir, family);
 
         Cpsr.getArm(unicorn).switchUserMode();
 
@@ -115,7 +115,16 @@ public abstract class AbstractARMEmulator<T extends NewFileIO> extends AbstractE
 
     @Override
     protected Debugger createConsoleDebugger() {
-        return new SimpleARMDebugger(this);
+        return new SimpleARMDebugger(this) {
+            @Override
+            protected void dumpClass(String className) {
+                AbstractARMEmulator.this.dumpClass(className);
+            }
+            @Override
+            protected void searchClass(String keywords) {
+                AbstractARMEmulator.this.searchClass(keywords);
+            }
+        };
     }
 
     @Override
@@ -129,12 +138,12 @@ public abstract class AbstractARMEmulator<T extends NewFileIO> extends AbstractE
     }
 
     @Override
-    public Module loadLibrary(File libraryFile) throws IOException {
+    public Module loadLibrary(File libraryFile) {
         return memory.load(libraryFile);
     }
 
     @Override
-    public Module loadLibrary(File libraryFile, boolean forceCallInit) throws IOException {
+    public Module loadLibrary(File libraryFile, boolean forceCallInit) {
         return memory.load(libraryFile, forceCallInit);
     }
 

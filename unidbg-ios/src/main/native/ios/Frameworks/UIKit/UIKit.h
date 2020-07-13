@@ -12,6 +12,8 @@ const NSNotificationName UIApplicationWillTerminateNotification = @"UIApplicatio
 const NSNotificationName UIApplicationDidFinishLaunchingNotification = @"UIApplicationDidFinishLaunchingNotification";
 const NSNotificationName UIApplicationDidChangeStatusBarOrientationNotification = @"UIApplicationDidChangeStatusBarOrientationNotification";
 const NSNotificationName UIApplicationDidChangeStatusBarFrameNotification = @"UIApplicationDidChangeStatusBarFrameNotification";
+const NSNotificationName UIKeyboardWillShowNotification = @"UIKeyboardWillShowNotification";
+const NSNotificationName UIKeyboardWillHideNotification = @"UIKeyboardWillHideNotification";
 
 typedef CGFloat UIWindowLevel;
 const UIWindowLevel UIWindowLevelNormal = 0.0;
@@ -132,6 +134,14 @@ typedef enum UIDeviceBatteryState : NSInteger {
 
 @interface NSString (Number)
 - (unsigned int)unsignedIntValue;
+@end
+
+@interface NSURLSessionConfiguration (CFNetwork)
++ (NSURLSessionConfiguration *)defaultSessionConfiguration;
+@end
+
+@interface NSURLSession (CFNetwork)
++ (NSURLSession *)sessionWithConfiguration:(NSURLSessionConfiguration *)configuration delegate:(id)delegate delegateQueue:(NSOperationQueue *)queue;
 @end
 
 @interface UIViewController : NSObject

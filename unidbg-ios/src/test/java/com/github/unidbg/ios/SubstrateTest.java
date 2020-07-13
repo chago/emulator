@@ -28,7 +28,7 @@ public class SubstrateTest extends EmulatorTest<DarwinARMEmulator> {
     public void testIgnore() {
     }
 
-    private void processMS() throws Exception {
+    private void processMS() {
         MachOLoader loader = (MachOLoader) emulator.getMemory();
         loader.setObjcRuntime(true);
 //        emulator.traceCode();
@@ -155,6 +155,8 @@ public class SubstrateTest extends EmulatorTest<DarwinARMEmulator> {
         Map<String, Object> map = new HashMap<>();
         map.put("name", getClass().getName());
         emulator.getSyscallHandler().addIOResolver(new NSUserDefaultsResolver("unidbg", map));
+
+        emulator.getSyscallHandler().setVerbose(false);
     }
 
     public static void main(String[] args) throws Exception {

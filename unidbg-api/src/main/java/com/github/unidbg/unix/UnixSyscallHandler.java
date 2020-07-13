@@ -1,6 +1,7 @@
 package com.github.unidbg.unix;
 
 import com.github.unidbg.Emulator;
+import com.github.unidbg.Family;
 import com.github.unidbg.Module;
 import com.github.unidbg.debugger.Breaker;
 import com.github.unidbg.file.FileIO;
@@ -96,7 +97,8 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
             return result;
         }
 
-        if (pathname.endsWith(emulator.getLibraryExtension())) {
+        Family family = emulator.getFamily();
+        if (pathname.endsWith(family.getLibraryExtension())) {
             for (Module module : emulator.getMemory().getLoadedModules()) {
                 for (MemRegion memRegion : module.getRegions()) {
                     if (pathname.equals(memRegion.getName())) {
@@ -119,7 +121,8 @@ public abstract class UnixSyscallHandler<T extends NewFileIO> implements Syscall
 
     protected abstract T createByteArrayFileIO(String pathname, int oflags, byte[] data);
 
-    protected int gettimeofday(Pointer tv, Pointer tz) {
+    @SuppressWarnings("unused")
+    protected int gettimeofday(Emulator<?> emulator, Pointer tv, Pointer tz) {
         if (log.isDebugEnabled()) {
             log.debug("gettimeofday tv=" + tv + ", tz=" + tz);
         }

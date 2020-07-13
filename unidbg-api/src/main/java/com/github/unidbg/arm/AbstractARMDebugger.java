@@ -1,10 +1,7 @@
 package com.github.unidbg.arm;
 
 import capstone.Capstone;
-import com.github.unidbg.AssemblyCodeDumper;
-import com.github.unidbg.Emulator;
-import com.github.unidbg.Module;
-import com.github.unidbg.Symbol;
+import com.github.unidbg.*;
 import com.github.unidbg.debugger.BreakPoint;
 import com.github.unidbg.debugger.BreakPointCallback;
 import com.github.unidbg.debugger.DebugListener;
@@ -406,6 +403,20 @@ public abstract class AbstractARMDebugger implements Debugger {
                 }
             }
         }
+        if (emulator.getFamily() == Family.iOS && line.startsWith("dump ")) {
+            String className = line.substring(5).trim();
+            if (className.length() > 0) {
+                dumpClass(className);
+                return false;
+            }
+        }
+        if (emulator.getFamily() == Family.iOS && line.startsWith("search ")) {
+            String keywords = line.substring(7).trim();
+            if (keywords.length() > 0) {
+                searchClass(keywords);
+                return false;
+            }
+        }
         if (line.startsWith("trace")) { // start trace instructions
             Memory memory = emulator.getMemory();
             Pattern pattern = Pattern.compile("trace\\s+(\\d+)\\s+(\\d+)");
@@ -471,7 +482,7 @@ public abstract class AbstractARMDebugger implements Debugger {
             for (Module module : memory.getLoadedModules()) {
                 if (filter == null || module.getPath().toLowerCase().contains(filter.toLowerCase()) || (filterAddress >= module.base && filterAddress < module.base + module.size)) {
                     sb.append(String.format("[%3s][%" + maxLengthSoName.length() + "s] ", index++, FilenameUtils.getName(module.name)));
-                    sb.append(String.format("[0x%0" + Long.toHexString(memory.getMaxSizeOfLibrary()).length() + "x-0x%x]", module.base, module.base + module.size));
+                    sb.append(String.format("[0x%0" + Long.toHexString(memory.getMaxSizeOfLibrary()).length() + "x-0x%x]", module.getBaseHeader(), module.base + module.size));
                     sb.append(module.getPath());
                     sb.append("\n");
                 }
@@ -555,6 +566,12 @@ public abstract class AbstractARMDebugger implements Debugger {
 
         showHelp();
         return false;
+    }
+
+    protected void searchClass(String keywords) {
+    }
+
+    protected void dumpClass(String className) {
     }
 
     void showHelp() {}
